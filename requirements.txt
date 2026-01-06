@@ -1,0 +1,6 @@
+pytest
+pytest-mock
+streamlit
+pandas
+beautifulsoup4
+httpx
