@@ -1,3 +1,17 @@
+"""
+Streamlit Dashboard for CodeRunner Quiz Monitoring
+==================================================
+
+This is the main entry point for the CodeRunner Dash application. It provides a
+web-based dashboard to visualize student performance on Moodle CodeRunner quizzes.
+
+The dashboard allows users to:
+    - Authenticate with Moodle credentials
+    - Fetch quiz data for a given quiz ID
+    - View aggregated metrics and visualizations
+    - Identify common failure patterns
+"""
+
 import os
 import streamlit as st
 from datetime import datetime

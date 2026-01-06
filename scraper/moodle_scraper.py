@@ -1,3 +1,15 @@
+"""
+MoodleScraper Module
+====================
+
+This module contains the MoodleScraper class, which is responsible for authenticating
+with a Moodle instance, fetching quiz attempt data, and extracting detailed
+student submission information.
+
+The scraper navigates the Moodle quiz review interface to collect per-question
+performance data, including scores, submission counts, and test case results.
+"""
+
 import streamlit as st
 import httpx
 from bs4 import BeautifulSoup
@@ -70,7 +82,7 @@ class MoodleScraper:
                 continue
 
             name = cols[2].get_text(strip=True).replace("Revisão de tentativa", "")
-            status_container.write(f"🔄 **[{idx+1}]** Processing: {name}")
+            status_container.write(f"🔄 **[{idx + 1}]** Processing: {name}")
 
             all_user_data.append(
                 self.fetch_student_details(name, link["href"])

@@ -1,3 +1,12 @@
+"""
+HTML Parser Module for Moodle Quiz Pages
+=========================================
+
+This module provides functions to parse Moodle HTML content related to CodeRunner
+questions. It extracts submission history, test case results, and scoring details
+from the rendered quiz review pages.
+"""
+
 from bs4 import BeautifulSoup
 from models.quiz_models import TestCase, QuestionData, UserQuizData
 

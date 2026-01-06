@@ -1,3 +1,11 @@
+"""
+Data Models for Quiz Analytics
+==============================
+
+This module defines the data structures used to represent quiz results throughout
+the scraping and analysis pipeline. All models are implemented as dataclasses.
+"""
+
 from dataclasses import dataclass, field
 from typing import List
 

@@ -1,3 +1,12 @@
+"""
+Analytics and Metrics Calculation Module
+=========================================
+
+This module processes raw quiz data into structured analytics for visualization.
+It transforms a list of UserQuizData objects into pandas DataFrames and computes
+aggregate failure patterns across all students.
+"""
+
 import collections
 import pandas as pd
 from typing import List
