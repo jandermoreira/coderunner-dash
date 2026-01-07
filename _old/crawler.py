@@ -297,7 +297,7 @@ def main():
 
 if __name__ == "__main__":
     # main()
-    with open("../sample-data/exemplo-tentativa5.html") as source:
+    with open("../tests/exemplo-tentativa5.html") as source:
         soup = BeautifulSoup(source, "html.parser")
         questions = soup.find_all("div", class_="coderunner")
         result = process_question(questions[1])
