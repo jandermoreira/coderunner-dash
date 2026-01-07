@@ -1,6 +1,7 @@
 pytest
 pytest-mock
 streamlit
+streamlit-autorefresh
 pandas
 beautifulsoup4
 httpx
