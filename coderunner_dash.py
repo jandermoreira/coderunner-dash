@@ -2,11 +2,13 @@ import os
 import streamlit as st
 import pandas as pd
 import pickle
+import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
 
 from scraper.moodle_scraper import MoodleScraper
 from analytics.metrics import calculate_analytics
+
 
 # ==========================================
 # ENVIRONMENT & STATE
@@ -23,12 +25,32 @@ def initialize_session_state():
     if 'last_auto_refresh' not in st.session_state:
         st.session_state.last_auto_refresh = 0
 
+
+# ==========================================
+# UTILS
+# ==========================================
+
+def format_timedelta(td):
+    """Formats timedelta into readable strings: +2s, +1:02, or +2:07:03."""
+    total_seconds = int(td.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    if hours > 0:
+        return f"+{hours}:{minutes:02}:{seconds:02}"
+    elif minutes > 0:
+        return f"+{minutes}:{seconds:02}"
+    else:
+        return f"+{seconds}s"
+
+
 # ==========================================
 # DATA & HISTORY MANAGEMENT
 # ==========================================
 
 def get_history_path(quiz_id):
     return f"history_{quiz_id}.pkl"
+
 
 def save_history_snapshot(quiz_id, data):
     """Appends current data as a timestamped snapshot in the history file."""
@@ -39,12 +61,12 @@ def save_history_snapshot(quiz_id, data):
         with open(path, "rb") as f:
             history = pickle.load(f)
 
-    # Avoid saving identical snapshots if no changes occurred
     snapshot = {"timestamp": datetime.now(), "data": data}
     history.append(snapshot)
 
     with open(path, "wb") as f:
         pickle.dump(history, f)
+
 
 def reset_history(quiz_id):
     """Deletes the history file for the specific quiz."""
@@ -54,6 +76,7 @@ def reset_history(quiz_id):
         st.success(f"History for Quiz {quiz_id} deleted.")
     else:
         st.error("No history file found to delete.")
+
 
 def load_local_cache():
     cache_path = "quiz_cache.pkl"
@@ -66,6 +89,7 @@ def load_local_cache():
     else:
         st.error("Cache file not found.")
 
+
 def sync_with_moodle(user, password, quiz_id):
     with st.status("Connecting and extracting data from Moodle...", expanded=True) as status:
         scraper = MoodleScraper(user, password)
@@ -76,17 +100,15 @@ def sync_with_moodle(user, password, quiz_id):
             st.session_state.raw_data = fetched_data
             st.session_state.last_sync = datetime.now().strftime('%H:%M:%S')
 
-            # Save Current Cache
             with open("quiz_cache.pkl", "wb") as f:
                 pickle.dump(fetched_data, f)
 
-            # Save History Snapshot
             save_history_snapshot(quiz_id, fetched_data)
-
             st.rerun()
         else:
             st.session_state.raw_data = None
             status.update(label="No data found.", state="error")
+
 
 # ==========================================
 # UI COMPONENTS
@@ -94,6 +116,7 @@ def sync_with_moodle(user, password, quiz_id):
 
 def render_sidebar():
     with st.sidebar:
+        st.title("📊 CodeRunner Monitoring System")
         st.header("Settings")
         user = st.text_input("Moodle User", value=os.getenv("MOODLE_USER", ""))
         pw = st.text_input("Password", type="password", value=os.getenv("MOODLE_PASS", ""))
@@ -104,9 +127,8 @@ def render_sidebar():
         if st.button("📂 Load Last Sync"):
             load_local_cache()
 
-        # --- RESET HISTORY WITH CONFIRMATION ---
         with st.expander("⚠️ Danger Zone"):
-            st.write("Resetting history will delete all saved snapshots for this Quiz ID.")
+            st.write("Resetting history will delete all snapshots for this Quiz ID.")
             if st.button("🗑️ Reset History"):
                 st.session_state.confirm_reset = True
 
@@ -138,27 +160,134 @@ def render_sidebar():
 
     return user, pw, qid
 
+
+def render_student_evolution(quiz_id, student_name):
+    """Renders real-time scale charts with lapses directly on the X-axis labels."""
+    history_path = get_history_path(quiz_id)
+    if not os.path.exists(history_path):
+        st.info("No history available.")
+        return
+
+    with open(history_path, "rb") as f:
+        history = pickle.load(f)
+
+    if not history:
+        return
+
+    # Reference for the scale
+    quiz_start_time = history[0]["timestamp"]
+
+    student_records = []
+    for snap in history:
+        student_data = next((s for s in snap["data"] if s.username == student_name), None)
+        if student_data:
+            student_records.append({
+                "timestamp": snap["timestamp"],
+                "questions": student_data.questions
+            })
+
+    if not student_records:
+        st.warning(f"No records found for {student_name}.")
+        return
+
+    num_questions = len(student_records[0]["questions"])
+
+    for q_idx in range(num_questions):
+        plot_data = []
+        prev_time = None
+
+        for record in student_records:
+            curr_time = record["timestamp"]
+            q_data = record["questions"][q_idx]
+
+            since_start = format_timedelta(curr_time - quiz_start_time)
+            since_prev = format_timedelta(curr_time - prev_time) if prev_time else "Init"
+
+            axis_label = f"{since_start}<br>{since_prev}"
+
+            for t_idx, test in enumerate(q_data.test_results):
+                plot_data.append({
+                    "Time": curr_time,
+                    "LapseLabel": axis_label,
+                    "Test Case": f"Test {t_idx + 1}",
+                    "Status": "Passed" if test.passed else "Failed"
+                })
+            prev_time = curr_time
+
+        if plot_data:
+            with st.expander(f"📈 Temporal evolution - Question {q_idx + 1}", expanded=False):
+                df_plot = pd.DataFrame(plot_data)
+
+                test_order = sorted(df_plot["Test Case"].unique(), key=lambda x: int(x.split()[-1]))
+
+                fig = px.scatter(
+                    df_plot,
+                    x="Time",
+                    y=f"Test Case",
+                    color="Status",
+                    color_discrete_map={"Passed": "#2ca02c", "Failed": "#d62728"},
+                    symbol="Status",
+                    symbol_map={"Passed": "circle", "Failed": "circle"},
+                    # 2. Definimos a ordem categórica aqui
+                    category_orders={"Test Case": test_order}
+                )
+
+                unique_points = df_plot.drop_duplicates("Time")
+
+                fig.update_layout(
+                    xaxis=dict(
+                        title=None,
+                        tickmode='array',
+                        tickvals=unique_points["Time"],
+                        ticktext=unique_points["LapseLabel"],
+                        tickangle=-75,
+                        showgrid=True
+                    ),
+
+                    yaxis={'type': 'category'},
+                    height=150 + (len(test_order) * 15),
+                    margin=dict(l=10, r=10, t=10, b=100),
+                    showlegend=False
+                )
+
+                st.plotly_chart(fig, width="stretch", key=f"plot_q_{student_name}_{q_idx}")
+
+
+def render_student(quiz_id, student_list):
+    for student in student_list:
+        column1, column2 = st.columns(2)
+
+        with column1:
+            st.text("Info")
+
+        with column1:
+            st.text("Health")
+
+        with st.expander(f"{student}", expanded=True):
+            render_student_evolution(quiz_id, student)
+
+
 def render_detailed_test_grid(raw_data):
     st.divider()
-    st.header("🔍 Detailed Test Case Status")
+    st.header("🔍 Current Status: All Students")
     num_questions = len(raw_data[0].questions)
 
     for i in range(num_questions):
-        question_label = f"Question {i + 1}"
-        with st.expander(f"View Status: {question_label}", expanded=True):
+        with st.expander(f"Question {i + 1} Status", expanded=True):
             results_map = {}
-            max_test_count = max(len(student.questions[i].test_results) for student in raw_data)
-
+            max_test_count = max(len(s.questions[i].test_results) for s in raw_data)
             for student in raw_data:
                 q_data = student.questions[i]
-                icons = [("🟢" if q_data.test_results[idx].passed else "🔴") if idx < len(q_data.test_results) else "⚪"
-                         for idx in range(max_test_count)]
-                results_map[student.username] = icons
+                results_map[student.username] = [
+                    ("🟢" if q_data.test_results[idx].passed else "🔴")
+                    if idx < len(q_data.test_results) else "⚪"
+                    for idx in range(max_test_count)
+                ]
+            st.dataframe(
+                pd.DataFrame(results_map).rename(index=lambda x: f"Test {x + 1}"),
+                width="stretch"
+            )
 
-            if results_map and max_test_count > 0:
-                grid_df = pd.DataFrame(results_map)
-                grid_df.index = [f"Test {t+1}" for t in range(max_test_count)]
-                st.dataframe(grid_df, width="stretch")
 
 # ==========================================
 # MAIN LOOP
@@ -166,7 +295,6 @@ def render_detailed_test_grid(raw_data):
 
 def run_dashboard():
     initialize_session_state()
-    st.title("📊 CodeRunner Monitoring System")
 
     username, password, quiz_id = render_sidebar()
 
@@ -174,11 +302,11 @@ def run_dashboard():
         sync_with_moodle(username, password, quiz_id)
 
     if isinstance(st.session_state.raw_data, list) and st.session_state.raw_data:
-        stats_df, common_errors = calculate_analytics(st.session_state.raw_data)
+        stats_df, _ = calculate_analytics(st.session_state.raw_data)
 
-        # Render metrics and charts (Keeping names from previous steps)
-        # render_top_metrics(stats_df)
-        # render_summary_charts(stats_df, common_errors)
+        st.subheader("📈 Evolution")
+        student_list = sorted(s.username for s in st.session_state.raw_data)
+        render_student(quiz_id, student_list)
 
         render_detailed_test_grid(st.session_state.raw_data)
 
@@ -191,6 +319,7 @@ def run_dashboard():
         )
     else:
         st.info("Please enter credentials in the sidebar and click 'Sync Now'.")
+
 
 if __name__ == "__main__":
     run_dashboard()
