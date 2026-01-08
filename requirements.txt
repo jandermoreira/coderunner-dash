@@ -1,7 +1,8 @@
+beautifulsoup4
+httpx
+pandas
+plotly
 pytest
 pytest-mock
 streamlit
-streamlit_autorefresh
-pandas
-beautifulsoup4
-httpx
+streamlit-autorefresh
