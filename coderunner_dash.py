@@ -1,4 +1,6 @@
 import os
+from pprint import pprint
+
 import streamlit as st
 import pandas as pd
 import pickle
@@ -113,6 +115,8 @@ def sync_with_moodle(user, password, quiz_id):
 # ==========================================
 # UI COMPONENTS
 # ==========================================
+
+
 
 def render_sidebar():
     with st.sidebar:
@@ -253,18 +257,33 @@ def render_student_evolution(quiz_id, student_name):
                 st.plotly_chart(fig, width="stretch", key=f"plot_q_{student_name}_{q_idx}")
 
 
-def render_student(quiz_id, student_list):
+def render_student(quiz_id, student_list, stats_df):
     for student in student_list:
-        column1, column2 = st.columns(2)
-
-        with column1:
-            st.text("Info")
-
-        with column1:
-            st.text("Health")
-
         with st.expander(f"{student}", expanded=True):
-            render_student_evolution(quiz_id, student)
+            student_stats = stats_df[stats_df["Student"] == student]
+
+            # Alert box
+            alerts = {}
+
+            total_regressions = int(student_stats.filter(like="Regressions").sum(axis=1).values[0])
+            if total_regressions > 0:
+                alerts["Regressions"] = total_regressions
+
+            tinkering_columns = student_stats.filter(like="has_tinkering")
+            is_tinkering = tinkering_columns.any(axis=1).iloc[0]
+            if is_tinkering:
+                alerts["Trial and error"] = "Alert"
+
+            if len(alerts) > 0:
+                column1, column2 = st.columns([3, 1])
+                with column1:
+                    render_student_evolution(quiz_id, student)
+
+                with column2:
+                    for title, value in alerts.items():
+                        st.metric(title, value)
+            else:
+                render_student_evolution(quiz_id, student)
 
 
 def render_detailed_test_grid(raw_data):
@@ -302,11 +321,25 @@ def run_dashboard():
         sync_with_moodle(username, password, quiz_id)
 
     if isinstance(st.session_state.raw_data, list) and st.session_state.raw_data:
-        stats_df, _ = calculate_analytics(st.session_state.raw_data)
+        history_path = get_history_path(quiz_id)
+        history_data = None
+        if os.path.exists(history_path):
+            with open(history_path, "rb") as f:
+                history_data = pickle.load(f)
+
+        stats_df, common_errors = calculate_analytics(st.session_state.raw_data,
+                                                      history=history_data)
+
+        # if not common_errors.empty:
+        #     st.subheader("🚨 Most Common Failures")
+        #     # Mostra os 5 testes que mais falham
+        #     st.bar_chart(common_errors.head(5))
+        # else:
+        #     st.success("No common failures detected!")
 
         st.subheader("📈 Evolution")
         student_list = sorted(s.username for s in st.session_state.raw_data)
-        render_student(quiz_id, student_list)
+        render_student(quiz_id, student_list, stats_df)
 
         render_detailed_test_grid(st.session_state.raw_data)
 

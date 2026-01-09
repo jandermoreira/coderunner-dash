@@ -20,6 +20,7 @@ class QuestionData:
     total_submissions: int
     final_score: float
     test_results: List[TestCase] = field(default_factory=list)
+    has_tinkering: bool = False
 
 
 @dataclass
