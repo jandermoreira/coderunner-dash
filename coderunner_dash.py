@@ -1,5 +1,4 @@
 import os
-from pprint import pprint
 
 import streamlit as st
 import pandas as pd
@@ -33,12 +32,14 @@ def initialize_session_state():
 # ==========================================
 
 def format_timedelta(td):
-    """Formats timedelta into readable strings: +2s, +1:02, or +2:07:03."""
+    """Formats timedelta into readable strings: +2s, +1:02, +2:07:03, +2 days"""
     total_seconds = int(td.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    if hours > 0:
+    if hours > 24:
+        return f"+{hours // 24} days"
+    elif hours > 0:
         return f"+{hours}:{minutes:02}:{seconds:02}"
     elif minutes > 0:
         return f"+{minutes}:{seconds:02}"
@@ -116,6 +117,32 @@ def sync_with_moodle(user, password, quiz_id):
 # UI COMPONENTS
 # ==========================================
 
+def lock_page_scroll():
+    st.markdown(
+        """
+        <style>
+            /* Desabilita o scroll da página principal */
+            .main {
+                overflow: hidden;
+            }
+            /* Remove margens extras que o Streamlit adiciona no topo */
+            .block-container {
+                padding-top: 2rem !important;
+                padding-bottom: 0rem !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_top_indicators(stats_df):
+    """Renders top indicators."""
+    with st.container():
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Students", len(stats_df))
+        c2.metric("Avg Progress", f"{stats_df.filter(like='(%)').mean().mean():.1f}%")
+        c3.metric("Last Sync", st.session_state.last_sync)
+        # st.divider()
 
 
 def render_sidebar():
@@ -314,6 +341,7 @@ def render_detailed_test_grid(raw_data):
 
 def run_dashboard():
     initialize_session_state()
+    lock_page_scroll()
 
     username, password, quiz_id = render_sidebar()
 
@@ -337,19 +365,23 @@ def run_dashboard():
         # else:
         #     st.success("No common failures detected!")
 
-        st.subheader("📈 Evolution")
-        student_list = sorted(s.username for s in st.session_state.raw_data)
-        render_student(quiz_id, student_list, stats_df)
+        st.text("")
+        render_top_indicators(stats_df)
 
-        render_detailed_test_grid(st.session_state.raw_data)
+        with st.container(height=610, width='stretch'):
+            st.subheader("📈 Evolution")
+            student_list = sorted(s.username for s in st.session_state.raw_data)
+            render_student(quiz_id, student_list, stats_df)
 
-        st.divider()
-        st.subheader("Progress Matrix (Overall %)")
-        st.dataframe(
-            stats_df.set_index("Student").filter(like="(%)")
-            .style.background_gradient(cmap="RdYlGn", vmin=0, vmax=100),
-            width="stretch"
-        )
+            render_detailed_test_grid(st.session_state.raw_data)
+
+            st.divider()
+            st.subheader("Progress Matrix (Overall %)")
+            st.dataframe(
+                stats_df.set_index("Student").filter(like="(%)")
+                .style.background_gradient(cmap="RdYlGn", vmin=0, vmax=100),
+                width="stretch"
+            )
     else:
         st.info("Please enter credentials in the sidebar and click 'Sync Now'.")
 
