@@ -125,17 +125,23 @@ def sync_with_moodle(user, password, quiz_id):
 # ==========================================
 
 def lock_page_scroll():
+    """Forces the main Streamlit window to be non-scrollable."""
     st.markdown(
         """
         <style>
-            /* Desabilita o scroll da página principal */
+            /* Alvos específicos do layout interno do Streamlit */
+            [data-testid="stAppViewContainer"], 
+            [data-testid="stMainViewContainer"], 
             .main {
-                overflow: hidden;
+                overflow: hidden !important;
+                height: 100vh;
             }
-            /* Remove margens extras que o Streamlit adiciona no topo */
-            .block-container {
+
+            /* Ajusta o padding do conteúdo principal */
+            [data-testid="stAppViewBlockContainer"] {
                 padding-top: 2rem !important;
                 padding-bottom: 0rem !important;
+                height: 100vh;
             }
         </style>
         """,
@@ -385,10 +391,20 @@ def run_dashboard():
 
             st.divider()
             st.subheader("Progress Matrix (Overall %)")
+            matrix_df = stats_df.set_index("Student").filter(like="(%)")
+            matrix_df = matrix_df[~matrix_df.index.duplicated(keep='first')]
+
+            if not matrix_df.columns.is_unique:
+                new_cols = []
+                counts = {}
+                for col in matrix_df.columns:
+                    counts[col] = counts.get(col, 0) + 1
+                    new_cols.append(f"{col}_{counts[col]}" if counts[col] > 1 else col)
+                matrix_df.columns = new_cols
+
             st.dataframe(
-                stats_df.set_index("Student").filter(like="(%)")
-                .style.background_gradient(cmap="RdYlGn", vmin=0, vmax=100),
-                width="stretch"
+                matrix_df.style.background_gradient(cmap="RdYlGn", vmin=0, vmax=100),
+                use_container_width=True
             )
     else:
         st.info("Please enter credentials in the sidebar and click 'Sync Now'.")
