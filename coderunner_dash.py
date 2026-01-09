@@ -95,7 +95,7 @@ def load_local_cache():
     if os.path.exists(cache_path):
         with open(cache_path, "rb") as f:
             st.session_state.raw_data = pickle.load(f)
-            st.session_state.last_sync = f"Cache: {datetime.now().strftime('%H:%M:%S')}"
+            st.session_state.last_sync = "Cached data"
         st.success("Data loaded from local cache!")
         st.rerun()
     else:
@@ -404,7 +404,7 @@ def run_dashboard():
 
             st.dataframe(
                 matrix_df.style.background_gradient(cmap="RdYlGn", vmin=0, vmax=100),
-                use_container_width=True
+                width="stretch"
             )
     else:
         st.info("Please enter credentials in the sidebar and click 'Sync Now'.")

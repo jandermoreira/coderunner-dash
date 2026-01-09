@@ -82,7 +82,7 @@ class MoodleScraper:
             f"{self.base_url}/mod/quiz/report.php?id={quiz_id}"
             "&mode=overview&attempts=enrolled_with&onlygraded"
             "&onlyregraded&slotmarks=1&tsort=firstname&tdir=3"
-            "&states=inprogress"
+            "&states=inprogress-finished"
         )
 
         resp = await self.client.get(report_url)
