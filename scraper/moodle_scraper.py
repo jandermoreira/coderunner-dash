@@ -1,21 +1,18 @@
 """
-MoodleScraper Module
-====================
-
-This module contains the MoodleScraper class, which is responsible for authenticating
-with a Moodle instance, fetching quiz attempt data, and extracting detailed
-student submission information.
-
-The scraper navigates the Moodle quiz review interface to collect per-question
-performance data, including scores, submission counts, and test case results.
+MoodleScraper Module (Async Version)
+====================================
+Restores asynchronous fetching using httpx.AsyncClient and asyncio.gather.
 """
 
 import streamlit as st
 import httpx
+import asyncio
 from bs4 import BeautifulSoup
+from typing import List
 
+# Ensure these imports match your project structure
 from models.quiz_models import UserQuizData
-from scraper.parser import parse_question_div
+from scraper.parser import parse_student_page
 
 
 class MoodleScraper:
@@ -23,7 +20,8 @@ class MoodleScraper:
         self.username = username
         self.password = password
         self.base_url = "https://ava.ufscar.br"
-        self.client = httpx.Client(
+        # Changed to AsyncClient
+        self.client = httpx.AsyncClient(
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
             },
@@ -31,10 +29,12 @@ class MoodleScraper:
             timeout=60.0
         )
 
-    def login(self) -> bool:
+    async def login(self) -> bool:
+        """Authenticates asynchronously."""
         try:
             login_url = f"{self.base_url}/login/index.php"
-            resp = self.client.get(login_url)
+            # Await the GET request
+            resp = await self.client.get(login_url)
             soup = BeautifulSoup(resp.text, "html.parser")
             token = soup.find("input", {"name": "logintoken"})
             if not token:
@@ -45,64 +45,79 @@ class MoodleScraper:
                 "password": self.password,
                 "logintoken": token["value"]
             }
-            r2 = self.client.post(login_url, data=payload)
+            # Await the POST request
+            r2 = await self.client.post(login_url, data=payload)
             return "sesskey" in r2.text or "login/logout.php" in r2.text
-        except Exception:
+        except Exception as e:
+            st.error(f"Login Error: {e}")
             return False
 
-    def run(self, quiz_id: str, status_container):
-        if not self.login():
+    async def fetch_student_details(self, name: str, url: str, status_container) -> UserQuizData:
+        """
+        Fetches a specific student's review page asynchronously
+        and hands the HTML to the synchronous parser.
+        """
+        try:
+            status_container.write(f"⚪ {name}")
+            resp = await self.client.get(url)
+            status_container.write(f"🟢 {name}")
+            return parse_student_page(resp.text, name)
+        except Exception as e:
+            st.warning(f"Failed to fetch data for {name}: {e}")
+            return UserQuizData(username=name)
+
+    async def run(self, quiz_id: str, status_container=None) -> List[UserQuizData]:
+        """
+        Main execution flow:
+        1. Login
+        2. Get main report table
+        3. Create async tasks for every student link
+        4. Execute all tasks in parallel
+        """
+        if not await self.login():
             st.error("Login failed! Verify your username and password.")
             return []
 
         report_url = (
             f"{self.base_url}/mod/quiz/report.php?id={quiz_id}"
             "&mode=overview&attempts=enrolled_with&onlygraded"
-            "&onlyregraded&slotmarks=1&tsort=firstname&tdir=4"
+            "&onlyregraded&slotmarks=1&tsort=firstname&tdir=3"
+            "&states=inprogress"
         )
 
-        resp = self.client.get(report_url)
+        resp = await self.client.get(report_url)
         soup = BeautifulSoup(resp.text, "html.parser")
 
         table = soup.select_one("table#attempts, table.generaltable")
         if not table:
-            st.error("Results table not found.")
+            st.error("Results table not found. Check Quiz ID or permissions.")
             return []
 
-        all_user_data = []
+        tasks = []
         rows = table.select("tbody tr")
 
-        for idx, row in enumerate(rows):
+        for row in rows:
             cols = row.find_all("td")
             if len(cols) < 3:
                 continue
 
+            # Find the review link
             link = cols[2].find("a", href=lambda h: h and "review.php" in h)
             if not link:
                 continue
 
             name = cols[2].get_text(strip=True).replace("Revisão de tentativa", "")
-            status_container.write(f"🔄 **[{idx + 1}]** Processing: {name}")
 
-            all_user_data.append(
-                self.fetch_student_details(name, link["href"])
-            )
+            # Create a coroutine object for this student and add to tasks list
+            tasks.append(self.fetch_student_details(name, link["href"], status_container))
 
-        return all_user_data
+        if status_container:
+            status_container.write(f"🚀 Starting fetch for {len(tasks)} students...")
 
-    def fetch_student_details(self, name: str, url: str) -> UserQuizData:
-        resp = self.client.get(url)
-        soup = BeautifulSoup(resp.text, "html.parser")
+        # Run all requests in parallel
+        results = await asyncio.gather(*tasks)
+        return results
 
-        q_divs = soup.select("div.que.coderunner")
-        user_data = UserQuizData(username=name)
-
-        for div in q_divs:
-            user_data.questions.append(
-                parse_question_div(div)
-            )
-
-        return user_data
-
-    def close(self):
-        self.client.close()
+    async def close(self):
+        """Closes the async client session."""
+        await self.client.aclose()

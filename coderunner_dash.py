@@ -1,14 +1,15 @@
 import os
-
-import streamlit as st
-import pandas as pd
 import pickle
-import plotly.express as px
-from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
 
-from scraper.moodle_scraper import MoodleScraper
+import asyncio
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
+
 from analytics.metrics import calculate_analytics
+from scraper.moodle_scraper import MoodleScraper
 
 
 # ==========================================
@@ -45,6 +46,14 @@ def format_timedelta(td):
         return f"+{minutes}:{seconds:02}"
     else:
         return f"+{seconds}s"
+
+
+async def run_scraper_async(user, password, quiz_id, status_box):
+    scraper = MoodleScraper(user, password)
+    try:
+        return await scraper.run(quiz_id, status_box)
+    finally:
+        await scraper.close()
 
 
 # ==========================================
@@ -95,9 +104,7 @@ def load_local_cache():
 
 def sync_with_moodle(user, password, quiz_id):
     with st.status("Connecting and extracting data from Moodle...", expanded=True) as status:
-        scraper = MoodleScraper(user, password)
-        fetched_data = scraper.run(quiz_id, status)
-        scraper.close()
+        fetched_data = asyncio.run(run_scraper_async(user, password, quiz_id, status))
 
         if fetched_data:
             st.session_state.raw_data = fetched_data
@@ -134,6 +141,7 @@ def lock_page_scroll():
         """,
         unsafe_allow_html=True
     )
+
 
 def render_top_indicators(stats_df):
     """Renders top indicators."""
