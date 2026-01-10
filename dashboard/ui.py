@@ -100,8 +100,8 @@ def render_student_evolution(quiz_id, student_name):
                        None)
 
     # Fallback to the first snapshot timestamp if parser didn't find the start date
-    reference_start_time = (student_ref.quiz_start_date
-                            if student_ref and student_ref.quiz_start_date
+    reference_start_time = (student_ref.quiz_start_timestamp
+                            if student_ref and student_ref.quiz_start_timestamp
                             else history[0]["timestamp"])
 
     student_records = []
