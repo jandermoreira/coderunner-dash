@@ -82,7 +82,7 @@ def render_sidebar():
 
 
 def render_student_evolution(quiz_id, student_name):
-    """Renders temporal evolution with a white circle marker for the quiz start time."""
+    """Renders questions evolution."""
     history_path = get_history_path(quiz_id)
     if not os.path.exists(history_path):
         st.info("No history available.")
@@ -265,7 +265,7 @@ def initialize_session_state():
 
 def run_dashboard():
     initialize_session_state()
-    
+
     username, password, quiz_id = render_sidebar()
 
     if st.session_state.raw_data == "loading":
