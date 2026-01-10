@@ -203,6 +203,11 @@ def render_student(quiz_id, student_list, stats_df):
             # Alert box
             alerts = {}
 
+            quiz_end_timestamp = student_stats.filter(like="End time")
+            if not quiz_end_timestamp.empty:
+                col = pd.to_datetime(quiz_end_timestamp.iloc[:, 0])
+                alerts["Finished"] = col.dt.strftime("%d/%m %H:%M").iloc[0]
+
             total_regressions = int(student_stats.filter(like="Regressions").sum(axis=1).values[0])
             if total_regressions > 0:
                 alerts["Regressions"] = total_regressions
