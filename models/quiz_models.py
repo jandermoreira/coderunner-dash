@@ -29,5 +29,5 @@ class QuestionData:
 class UserQuizData:
     username: str
     questions: List[QuestionData] = field(default_factory=list)
-    quiz_start_date: Any = None
-    quiz_end_date: Any = None
+    quiz_start_timestamp: Any = None
+    quiz_end_timestamp: Any = None

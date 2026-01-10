@@ -116,8 +116,8 @@ def parse_student_page(html: str, username: str) -> UserQuizData:
                     quiz_start_date = parse_moodle_datetime(data.get_text(strip=True))
                 elif "Concluída em" in header_text:
                     quiz_end_date = parse_moodle_datetime(data.get_text(strip=True))
-    user.quiz_start_date = quiz_start_date
-    user.quiz_end_date = quiz_end_date
+    user.quiz_start_timestamp = quiz_start_date
+    user.quiz_end_timestamp = quiz_end_date
 
     for div in q_divs:
         user.questions.append(parse_question_div(div))
