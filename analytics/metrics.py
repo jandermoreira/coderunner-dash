@@ -44,7 +44,11 @@ def calculate_analytics(current_results: List[UserQuizData], history: List[Dict[
     failure_patterns = collections.defaultdict(int)
 
     for user in current_results:
-        entry = {"Student": user.username}
+        entry = {
+            "Student": user.username,
+            "Start time": user.quiz_start_timestamp,
+            "End time": user.quiz_end_timestamp
+        }
 
         for question_idx, question in enumerate(user.questions):
             entry[f"Q{question_idx + 1} (%)"] = question.final_score
