@@ -12,6 +12,26 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from models.quiz_models import TestCase, QuestionData, UserQuizData
 
+def parse_moodle_datetime(text: str) -> datetime:
+    """
+    Parses Moodle PT-BR date strings into datetime objects.
+    Example: "terça, 9 dez 2025, 08:10"
+    """
+    months_map = {
+        "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+        "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12
+    }
+    try:
+        # Regex matches: Day, Month (3 letters), Year, Hour, Minute
+        match = re.search(r'(\d{1,2})\s+(\w{3})\s+(\d{4}),\s+(\d{1,2}):(\d{2})', text)
+        if match:
+            day, month_abbr, year, hour, minute = match.groups()
+            month = months_map.get(month_abbr.lower(), 1)
+            return datetime(int(year), month, int(day), int(hour), int(minute))
+    except (AttributeError, ValueError):
+        pass
+    return None
+
 def parse_question_div(div, min_interval_minutes: int = 2) -> QuestionData:
     p_score, t_score = 0.0, 1.0
 
@@ -39,44 +59,40 @@ def parse_question_div(div, min_interval_minutes: int = 2) -> QuestionData:
                     TestCase(passed="fa-check" in (icon.get("class", []) if icon else []))
                 )
 
-    # 3. Time-based Tinkering Detection
-    # Logic: Find "Enviar" rows and extract the timestamp from the second column
+    # 3. Submission History and Quiz Start extraction
     submission_times = []
+    quiz_start_timestamp = None
+
     hist_table = div.select_one("div.history table.generaltable")
     if hist_table and hist_table.tbody:
-        for row in hist_table.tbody.find_all("tr"):
+        rows = hist_table.tbody.find_all("tr")
+
+        # The last row represents the "Started on" event
+        if rows:
+            start_cells = rows[-1].find_all("td")
+            if len(start_cells) >= 2:
+                t_match = re.search(r'(\d{1,2}:\d{2})', start_cells[1].get_text())
+                d_match = re.search(r'(\d{1,2}) de (\w+) de (\d{4})', start_cells[1].get_text())
+                if t_match and d_match:
+                    quiz_start_timestamp = f"{d_match.group(1)} {d_match.group(2)} {d_match.group(3)} {t_match.group(1)}"
+
+        for row in rows:
             cells = row.find_all("td")
             if len(cells) >= 2 and "Enviar" in cells[0].get_text():
-                # Extract time using regex to avoid locale issues with month names
-                # Moodle format: "... 9 de dezembro 2025, 15:45"
                 time_match = re.search(r'(\d{1,2}:\d{2})', cells[1].get_text())
                 date_match = re.search(r'(\d{1,2}) de (\w+) de (\d{4})', cells[1].get_text())
-
                 if time_match and date_match:
-                    # We only really need the relative difference, so we focus on HH:MM
-                    # and full date for sub-minute precision if available
                     time_str = f"{date_match.group(1)} {date_match.group(2)} {date_match.group(3)} {time_match.group(1)}"
                     submission_times.append(time_str)
 
-    # Simple Tinkering Logic:
-    # Since parsing Portuguese dates natively is tricky without 'dateparser',
-    # an alternative is to check if there are multiple "Enviar" actions
-    # within the same hour/minute block in the text.
-
-    # For a robust version, we use the raw text timestamps:
-    tinkering_detected = False
-    if len(submission_times) > 1:
-        # If the number of 'Enviar' actions is high, and they happen
-        # in the same session, we flag it.
-        # To be precise with "frequency in time", we'd need a full date parser.
-        # For now, we flag if more than 3 'Enviar' exist (as a proxy for frequency).
-        tinkering_detected = len(submission_times) >= 4
+    tinkering_detected = len(submission_times) >= 4
 
     return QuestionData(
         total_submissions=max(len(submission_times), 1),
         final_score=round((p_score / t_score) * 100, 1) if t_score > 0 else 0.0,
         test_results=test_results,
-        has_tinkering=tinkering_detected
+        has_tinkering=tinkering_detected,
+        quiz_start_timestamp=quiz_start_timestamp
     )
 
 def parse_student_page(html: str, username: str) -> UserQuizData:
@@ -84,6 +100,25 @@ def parse_student_page(html: str, username: str) -> UserQuizData:
     q_divs = soup.select("div.que.coderunner")
 
     user = UserQuizData(username=username)
+
+    summary_table = soup.select_one("table.quizreviewsummary")
+    quiz_start_date = None
+    quiz_end_date = None
+
+    if summary_table:
+        rows = summary_table.find_all("tr")
+        for row in rows:
+            header = row.find("th")
+            data = row.find("td")
+            if header and data:
+                header_text = header.get_text(strip=True)
+                if "Iniciado em" in header_text:
+                    quiz_start_date = parse_moodle_datetime(data.get_text(strip=True))
+                elif "Concluída em" in header_text:
+                    quiz_end_date = parse_moodle_datetime(data.get_text(strip=True))
+    user.quiz_start_date = quiz_start_date
+    user.quiz_end_date = quiz_end_date
+
     for div in q_divs:
         user.questions.append(parse_question_div(div))
 

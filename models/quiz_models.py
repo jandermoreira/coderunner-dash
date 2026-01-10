@@ -7,7 +7,7 @@ the scraping and analysis pipeline. All models are implemented as dataclasses.
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Any
 
 
 @dataclass
@@ -16,14 +16,18 @@ class TestCase:
 
 
 @dataclass
+@dataclass
 class QuestionData:
     total_submissions: int
     final_score: float
     test_results: List[TestCase] = field(default_factory=list)
     has_tinkering: bool = False
+    quiz_start_timestamp: str = None
 
 
 @dataclass
 class UserQuizData:
     username: str
     questions: List[QuestionData] = field(default_factory=list)
+    quiz_start_date: Any = None
+    quiz_end_date: Any = None
