@@ -16,7 +16,6 @@ class TestCase:
 
 
 @dataclass
-@dataclass
 class QuestionData:
     total_submissions: int
     final_score: float
