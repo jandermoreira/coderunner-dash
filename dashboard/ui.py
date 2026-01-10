@@ -4,7 +4,7 @@ UI
 
 This module implements the dashboard UI.
 """
-
+from analytics.metrics import calculate_analytics
 from dashboard.data_management import *
 
 
@@ -22,31 +22,6 @@ def format_timedelta(td):
         return f"+{minutes}:{seconds:02}"
     else:
         return f"+{seconds}s"
-
-
-def lock_page_scroll():
-    """Forces the main Streamlit window to be non-scrollable."""
-    st.markdown(
-        """
-        <style>
-            /* Alvos específicos do layout interno do Streamlit */
-            [data-testid="stAppViewContainer"], 
-            [data-testid="stMainViewContainer"], 
-            .main {
-                overflow: hidden !important;
-                height: 100vh;
-            }
-
-            /* Ajusta o padding do conteúdo principal */
-            [data-testid="stAppViewBlockContainer"] {
-                padding-top: 2rem !important;
-                padding-bottom: 0rem !important;
-                height: 100vh;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
 
 
 def render_top_indicators(stats_df):
@@ -285,8 +260,7 @@ def initialize_session_state():
 
 def run_dashboard():
     initialize_session_state()
-    lock_page_scroll()
-
+    
     username, password, quiz_id = render_sidebar()
 
     if st.session_state.raw_data == "loading":
