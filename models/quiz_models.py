@@ -13,6 +13,8 @@ from typing import List, Any
 @dataclass
 class TestCase:
     passed: bool
+    is_compilation_error: bool = False
+    is_runtime_error: bool = False
 
 
 @dataclass
@@ -22,6 +24,9 @@ class QuestionData:
     test_results: List[TestCase] = field(default_factory=list)
     has_tinkering: bool = False
     quiz_start_timestamp: str = None
+    technical_noise_ratio: float = 0.0
+    strategy_label: str = "Unknown"
+    intervention_priority: str = "Low"
 
 
 @dataclass
