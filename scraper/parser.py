@@ -102,8 +102,8 @@ def parse_student_page(html: str, username: str) -> UserQuizData:
     user = UserQuizData(username=username)
 
     summary_table = soup.select_one("table.quizreviewsummary")
-    quiz_start_date = None
-    quiz_end_date = None
+    quiz_start_timestamp = None
+    quiz_end_timestamp = None
 
     if summary_table:
         rows = summary_table.find_all("tr")
@@ -113,11 +113,11 @@ def parse_student_page(html: str, username: str) -> UserQuizData:
             if header and data:
                 header_text = header.get_text(strip=True)
                 if "Iniciado em" in header_text:
-                    quiz_start_date = parse_moodle_datetime(data.get_text(strip=True))
+                    quiz_start_timestamp = parse_moodle_datetime(data.get_text(strip=True))
                 elif "Concluída em" in header_text:
-                    quiz_end_date = parse_moodle_datetime(data.get_text(strip=True))
-    user.quiz_start_timestamp = quiz_start_date
-    user.quiz_end_timestamp = quiz_end_date
+                    quiz_end_timestamp = parse_moodle_datetime(data.get_text(strip=True))
+    user.quiz_start_timestamp = quiz_start_timestamp
+    user.quiz_end_timestamp = quiz_end_timestamp
 
     for div in q_divs:
         user.questions.append(parse_question_div(div))
