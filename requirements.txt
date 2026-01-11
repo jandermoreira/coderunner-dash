@@ -6,3 +6,4 @@ pytest
 pytest-mock
 streamlit
 streamlit-autorefresh
+streamlit-extras
