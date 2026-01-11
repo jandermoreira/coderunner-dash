@@ -48,8 +48,8 @@ def reset_history(quiz_id):
         st.error("No history file found to delete.")
 
 
-def load_local_cache():
-    cache_path = "quiz_cache.pkl"
+def load_local_cache(quiz_id):
+    cache_path = f"quiz_{quiz_id}_cache.pkl"
     if os.path.exists(cache_path):
         with open(cache_path, "rb") as f:
             st.session_state.raw_data = pickle.load(f)
@@ -68,7 +68,7 @@ def sync_with_moodle(user, password, quiz_id):
             st.session_state.raw_data = fetched_data
             st.session_state.last_sync = datetime.now().strftime('%H:%M:%S')
 
-            with open("quiz_cache.pkl", "wb") as f:
+            with open(f"quiz_{quiz_id}_cache.pkl", "wb") as f:
                 pickle.dump(fetched_data, f)
 
             save_history_snapshot(quiz_id, fetched_data)
