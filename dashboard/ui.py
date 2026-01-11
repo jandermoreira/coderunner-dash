@@ -4,8 +4,12 @@ UI
 
 This module implements the dashboard UI.
 """
+import pandas as pd
+
 from analytics.metrics import calculate_analytics
 from dashboard.data_management import *
+from streamlit_extras.stylable_container import stylable_container
+from streamlit_extras.metric_cards import style_metric_cards
 
 
 def format_timedelta(td):
@@ -27,11 +31,15 @@ def format_timedelta(td):
 def render_top_indicators(stats_df):
     """Renders top indicators."""
     with st.container():
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Students", len(stats_df))
-        c2.metric("Avg Progress", f"{stats_df.filter(like='(%)').mean().mean():.1f}%")
-        c3.metric("Last Sync", st.session_state.last_sync)
-        # st.divider()
+        data = {
+            "Students": len(stats_df),
+            "Avg Progress": f"{stats_df.filter(like='(%)').mean().mean():.1f}%",
+            "Last Sync": st.session_state.last_sync
+        }
+        columns = st.columns(len(data))
+        for idx, (title, value) in enumerate(data.items()):
+            with columns[idx]:
+                st.metric(title, value)
 
 
 def render_sidebar():
@@ -40,26 +48,27 @@ def render_sidebar():
         st.header("Settings")
         user = st.text_input("Moodle User", value=os.getenv("MOODLE_USER", ""))
         pw = st.text_input("Password", type="password", value=os.getenv("MOODLE_PASS", ""))
-        qid = st.text_input("Quiz ID", value=os.getenv("MOODLE_QUIZ_ID", "958257"))
+        qid = st.text_input("Quiz ID", value=os.getenv("MOODLE_QUIZ_ID", ""))
 
         st.divider()
         st.subheader("Data Management")
-        if st.button("📂 Load Last Sync"):
-            load_local_cache()
+        st.session_state.confirm_reset = False
+        reload_col, reset_col = st.columns([5, 6])
+        with reload_col:
+            if st.button("📂 Load Last Sync"):
+                load_local_cache(qid)
 
-        with st.expander("⚠️ Danger Zone"):
-            st.write("Resetting history will delete all snapshots for this Quiz ID.")
+        with reset_col:
             if st.button("🗑️ Reset History"):
                 st.session_state.confirm_reset = True
-
             if st.session_state.get('confirm_reset'):
                 st.warning("Are you sure?")
                 col_yes, col_no = st.columns(2)
-                if col_yes.button("Yes, delete"):
+                if col_yes.button("YES", width="stretch"):
                     reset_history(qid)
                     st.session_state.confirm_reset = False
                     st.rerun()
-                if col_no.button("Cancel"):
+                if col_no.button("No", width="stretch"):
                     st.session_state.confirm_reset = False
                     st.rerun()
 
@@ -69,7 +78,8 @@ def render_sidebar():
         interval = st.slider("Interval (minutes)", 2, 10, 5, disabled=not enable_auto_sync)
 
         if enable_auto_sync:
-            refresh_count = st_autorefresh(interval=interval * 60 * 1000, key="moodle_auto_sync")
+            refresh_count = st_autorefresh(interval=interval * 60 * 1000,
+                                           key="moodle_auto_sync")
             if refresh_count > st.session_state.last_auto_refresh:
                 st.session_state.last_auto_refresh = refresh_count
                 st.session_state.raw_data = "loading"
@@ -81,8 +91,8 @@ def render_sidebar():
     return user, pw, qid
 
 
-def render_student_evolution(quiz_id, student_name):
-    """Renders questions evolution."""
+def render_student_evolution(quiz_id, student_name, index):
+    """Renders questions evolution (index is used to have unique keys in plots)."""
     history_path = get_history_path(quiz_id)
     if not os.path.exists(history_path):
         st.info("No history available.")
@@ -96,8 +106,9 @@ def render_student_evolution(quiz_id, student_name):
 
     # 1. Identify the student's actual start time (quiz_start_date)
     # Search history for the first occurrence of this student with a valid start date
-    student_ref = next((s for snap in history for s in snap["data"] if s.username == student_name),
-                       None)
+    student_ref = next(
+        (s for snap in history for s in snap["data"] if s.username == student_name),
+        None)
 
     # Fallback to the first snapshot timestamp if parser didn't find the start date
     reference_start_time = (student_ref.quiz_start_timestamp
@@ -122,6 +133,13 @@ def render_student_evolution(quiz_id, student_name):
         plot_data = []
 
         prev_time = reference_start_time
+        for t_idx in range(len(student_records[0]["questions"][0].test_results)):
+            plot_data.append({
+                "Time": reference_start_time,
+                "LapseLabel": reference_start_time.strftime("%d/%m/%Y<br>%H:%M"),
+                "Test Case": f"Test {t_idx + 1}",
+                "Status": "Opened"
+            })
 
         for record in student_records:
             curr_time = record["timestamp"]
@@ -131,13 +149,13 @@ def render_student_evolution(quiz_id, student_name):
             since_prev = format_timedelta(curr_time - prev_time) if prev_time else "Init"
             axis_label = f"{since_start} / {since_prev}"
 
-            for t_idx, _ in enumerate(q_data.test_results):
-                plot_data.append({
-                    "Time": reference_start_time,
-                    "LapseLabel": reference_start_time.strftime("%d/%m/%Y<br>%H:%M"),
-                    "Test Case": f"Test {t_idx + 1}",
-                    "Status": "Opened"
-                })
+            # for t_idx in range(len(q_data.test_results)):
+            #     plot_data.append({
+            #         "Time": reference_start_time,
+            #         "LapseLabel": reference_start_time.strftime("%d/%m/%Y<br>%H:%M"),
+            #         "Test Case": f"Test {t_idx + 1}",
+            #         "Status": "Opened"
+            #     })
 
             for t_idx, test in enumerate(q_data.test_results):
                 plot_data.append({
@@ -192,23 +210,77 @@ def render_student_evolution(quiz_id, student_name):
                     showlegend=False
                 )
 
-                st.plotly_chart(fig, width="stretch", key=f"plot_q_{student_name}_{q_idx}")
+                st.plotly_chart(fig, width="stretch",
+                                key=f"plot_q_{student_name}_{index}_{q_idx}")
 
+
+def render_student_details(student_stats: pd.DataFrame, student_extra_details: dict):
+    """
+    Renders the student's performance metrics, including the overall quiz grade.
+    """
+    score_columns = student_stats.filter(like="(%)")
+
+    if not score_columns.empty:
+        overall_grade = score_columns.mean(axis=1).values[0]
+    else:
+        overall_grade = 0.0
+
+    performance_metrics = {
+        "Overall Grade": f"{overall_grade:.1f}%",
+    }
+
+    performance_metrics.update(student_extra_details)
+
+    # Render metrics in horizontally aligned columns
+    if performance_metrics:
+        columns = st.columns(len(performance_metrics))
+        for index, (label, value) in enumerate(performance_metrics.items()):
+            with columns[index]:
+                st.metric(label, value)
+
+
+css = """
+    {background-color: #303030; padding: 15px; border-radius: 8px;}
+"""
+
+
+# st.markdown("""
+#         <style>
+#         [data-testid="stMetricValue"] {
+#             font-size: 8px;
+#             font-weight: 600;
+#         }
+#
+#         [data-testid="stMetricLabel"] {
+#             font-size: 8px;
+#         }
+#
+#         [data-testid="stMetricDelta"] {
+#             font-size: 8px;
+#         }
+#         </style>
+#     """, unsafe_allow_html=True)
 
 def render_student(quiz_id, student_list, stats_df):
-    for student in student_list:
-        with st.expander(f"{student}", expanded=True):
+    for idx, student in enumerate(student_list):
+        with stylable_container(key=f"card_{student}_{idx}", css_styles=css):
             student_stats = stats_df[stats_df["Student"] == student]
 
             # Alert box
             alerts = {}
+            student_extra_details = {}
 
             quiz_end_timestamp = student_stats.filter(like="End time")
-            if not quiz_end_timestamp.empty:
+
+            numeric_timestamp = pd.to_numeric(quiz_end_timestamp.iloc[:, 0]).iloc[0]
+            if numeric_timestamp > 0:
                 col = pd.to_datetime(quiz_end_timestamp.iloc[:, 0])
                 alerts["Finished"] = col.dt.strftime("%d/%m %H:%M").iloc[0]
+            else:
+                student_extra_details["Status"] = "In progress"
 
-            total_regressions = int(student_stats.filter(like="Regressions").sum(axis=1).values[0])
+            total_regressions = int(
+                student_stats.filter(like="Regressions").sum(axis=1).values[0])
             if total_regressions > 0:
                 alerts["Regressions"] = total_regressions
 
@@ -220,13 +292,18 @@ def render_student(quiz_id, student_list, stats_df):
             if len(alerts) > 0:
                 column1, column2 = st.columns([3, 1])
                 with column1:
-                    render_student_evolution(quiz_id, student)
+                    st.markdown(f"#### {student}")
+                    render_student_details(student_stats, student_extra_details)
+                    render_student_evolution(quiz_id, student, idx)
 
                 with column2:
                     for title, value in alerts.items():
                         st.metric(title, value)
             else:
-                render_student_evolution(quiz_id, student)
+                st.markdown(f"##### {student}")
+                render_student_details(student_stats, student_extra_details)
+                render_student_evolution(quiz_id, student, idx)
+            st.text("")
 
 
 def render_detailed_test_grid(raw_data):
@@ -292,7 +369,6 @@ def run_dashboard():
         render_top_indicators(stats_df)
 
         with st.container(height=610, width='stretch'):
-            st.subheader("📈 Evolution")
             student_list = sorted(s.username for s in st.session_state.raw_data)
             render_student(quiz_id, student_list, stats_df)
 
