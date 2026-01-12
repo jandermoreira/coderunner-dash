@@ -3,8 +3,7 @@ HTML Parser Module for Moodle Quiz Pages
 =========================================
 
 This module parses Moodle HTML to extract CodeRunner submission data.
-It is designed to support incremental updates by first extracting step metadata
-(IDs/Timestamps) to allow the scraper to filter out already-processed steps.
+Updated to handle Moodle Theme Moove, localized headers and numeric dates.
 """
 
 import re
@@ -16,21 +15,34 @@ from models.quiz_models import TestCase, SubmissionStep, QuestionData, UserQuizD
 def parse_moodle_datetime(text: str) -> Optional[datetime]:
     """
     Parses Moodle PT-BR date strings into datetime objects.
-    Example: "terça, 9 dez 2025, 08:10" or "9 dez 2025, 08:10"
+    Supports both:
+    1. Extended: "terça, 9 dez 2025, 08:10" or "9 dez 2025, 08:10"
+    2. Numeric:  "09/12/2025 08:10" (Common in history tables)
     """
     months_map = {
         "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
         "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12
     }
+
+    text = text.strip().lower()
+
     try:
-        # Regex matches: Day, Month (3 letters), Year, Hour, Minute
-        match = re.search(r'(\d{1,2})\s+(\w{3})\s+(\d{4}),?\s+(\d{1,2}):(\d{2})', text)
-        if match:
-            day, month_abbr, year, hour, minute = match.groups()
-            month = months_map.get(month_abbr.lower(), 1)
+        # 1. Try Numeric Format: dd/mm/yyyy HH:MM
+        match_num = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})', text)
+        if match_num:
+            day, month, year, hour, minute = map(int, match_num.groups())
+            return datetime(year, month, day, hour, minute)
+
+        # 2. Try Extended Format: [Dayname,] Day Month(abbr) Year, Hour:Minute
+        match_ext = re.search(r'(\d{1,2})\s+(\w{3})\s+(\d{4}),?\s+(\d{1,2}):(\d{2})', text)
+        if match_ext:
+            day, month_abbr, year, hour, minute = match_ext.groups()
+            month = months_map.get(month_abbr, 1)
             return datetime(int(year), month, int(day), int(hour), int(minute))
+
     except (AttributeError, ValueError):
         pass
+
     return None
 
 def extract_step_id(url: str) -> Optional[int]:
@@ -43,21 +55,13 @@ def extract_step_id(url: str) -> Optional[int]:
 def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
     """
     Scans the history table of a question to find all submission steps.
-
-    Returns a list of metadata dicts used for cache checking:
-    [
-        {
-            "step_id": 12345,       # Unique ID for deduplication
-            "url": "...",           # URL to fetch full details
-            "timestamp": datetime   # When it happened
-        },
-        ...
-    ]
     """
     steps_metadata = []
 
     # Locate the history table within the question div
-    hist_table = question_div.select_one("div.history table.generaltable")
+    # Robust selector: tries strict hierarchy first, then falls back to just the table class
+    hist_table = question_div.select_one("div.history table.generaltable") or \
+                 question_div.select_one("table.generaltable")
 
     if hist_table and hist_table.tbody:
         rows = hist_table.tbody.find_all("tr")
@@ -66,20 +70,20 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
             if len(cells) < 2:
                 continue
 
-            # Check action column for submission links (e.g., "Enviar", "Submetido")
+            # Column 0: Link to the step (Step number or "Review")
             action_cell = cells[0]
             link = action_cell.find("a", href=True)
 
-            # We only care about rows that link to a specific step state
+            # We only care about rows that link to a specific step details page
             if link and "reviewquestion.php" in link['href']:
                 step_url = link['href']
                 step_id = extract_step_id(step_url)
 
-                # Timestamp is usually in the second column
+                # Column 1: Timestamp
                 ts_text = cells[1].get_text(strip=True)
                 timestamp = parse_moodle_datetime(ts_text)
 
-                if step_id and timestamp:
+                if step_id is not None and timestamp:
                     steps_metadata.append({
                         "step_id": step_id,
                         "url": step_url,
@@ -93,12 +97,10 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
 def parse_step_detail(html: str, timestamp: datetime) -> SubmissionStep:
     """
     Parses a specific 'reviewquestion.php' page (a single step).
-    Handles both standard test results and compilation errors.
     """
     soup = BeautifulSoup(html, "html.parser")
 
-    # We focus on the specific question content wrapper
-    # Usually class 'que coderunner'
+    # Focus on question wrapper if possible
     q_div = soup.select_one("div.que.coderunner") or soup
 
     # 1. Score Extraction
@@ -106,53 +108,66 @@ def parse_step_detail(html: str, timestamp: datetime) -> SubmissionStep:
     grading = q_div.select_one("div.gradingdetails")
     if grading:
         try:
-            # Looks for "Mark 1.00 out of 1.00" or "Nota 1,00 de 1,00"
             text = grading.get_text(strip=True)
-            # Strategy: Find the part before "de" or "out of"
-            # Regex designed to catch localized number formats
-            match = re.search(r'([\d.,]+)\s*(?:/|de|out of)', text)
+            # Regex to catch: "Mark 1.00 out of", "Nota 1,00 de", "Atingiu 0.50 de"
+            match = re.search(r'([\d.,]+)\s*(?:/|de|out of|de um)', text)
             if match:
                 score_str = match.group(1).replace(',', '.')
                 score = float(score_str)
         except Exception:
-            pass # Keep score 0.0 on failure
+            pass
 
     # 2. Test Cases Extraction
     test_results = []
 
-    # Attempt A: Standard Test Results Table
+    # Strategy: Find table by specific class, OR search for table with expected headers
     test_table = q_div.select_one("table.coderunner-test-results")
+
+    if not test_table:
+        # Fallback: Find any table with "Input" or "Teste" headers
+        for tbl in q_div.find_all("table"):
+            headers = [th.get_text(strip=True).lower() for th in tbl.find_all("th")]
+            if any(x in headers for x in ["input", "teste", "test", "esperado"]):
+                test_table = tbl
+                break
 
     if test_table and test_table.tbody:
         for row in test_table.tbody.find_all("tr"):
-            cols = row.find_all("td")
-            if not cols: continue
+            # Ensure it's not a header row inside body
+            if not row.find("td"): continue
 
-            # Check icon class for pass/fail
-            icon = row.find("i") or row.find("img") # Moodle sometimes uses img
+            # --- Pass/Fail Detection ---
             passed = False
-            if icon:
-                classes = icon.get("class", [])
-                passed = "fa-check" in classes or "icon-check" in str(classes)
+            # Find icon: search for <i> or <img> with specific classes
+            icon = row.select_one(".icon, .fa")
 
-            # Identify Runtime Errors in the output column (usually 3rd or 4th)
+            if icon:
+                classes = " ".join(icon.get("class", [])).lower()
+                if "check" in classes or "pass" in classes:
+                    passed = True
+
+            # --- Error Detection ---
             is_runtime = False
+            is_compilation = False
+
             if not passed:
                 row_text = row.get_text().lower()
-                if "exception" in row_text or "error" in row_text:
+                if "***run error***" in row_text or "exception" in row_text or "traceback" in row_text:
                     is_runtime = True
+                elif "syntaxerror" in row_text or "compilation error" in row_text:
+                    is_compilation = True
 
             test_results.append(TestCase(
                 passed=passed,
-                is_runtime_error=is_runtime
+                is_runtime_error=is_runtime,
+                is_compilation_error=is_compilation
             ))
 
-    # Attempt B: Compilation/Syntax Error
-    # If no table exists, look for error containers
+    # 3. Global Error Handling (No table present)
     elif q_div.select_one(".coderunner-test-results.failure") or \
-            q_div.select_one(".coderunner-compilation-output"):
+         q_div.select_one(".coderunner-compilation-output") or \
+         "syntaxerror" in q_div.get_text().lower():
 
-        # Create a single "failed" test case representing the syntax error
         test_results.append(TestCase(
             passed=False,
             is_compilation_error=True
@@ -167,7 +182,6 @@ def parse_step_detail(html: str, timestamp: datetime) -> SubmissionStep:
 def parse_student_page(html: str, username: str) -> UserQuizData:
     """
     Parses the main review page to initialize the UserQuizData structure.
-    Does NOT download steps; merely prepares the container.
     """
     soup = BeautifulSoup(html, "html.parser")
     user_data = UserQuizData(username=username)
@@ -186,15 +200,16 @@ def parse_student_page(html: str, username: str) -> UserQuizData:
                 elif "conclu" in text or "finished" in text:
                     user_data.quiz_end_timestamp = parse_moodle_datetime(val)
 
-    # 2. Identify Questions (but don't parse deep details yet)
-    # We find the question containers to initialize the list
-    q_divs = soup.select("div.que.coderunner")
+    # 2. Identify Questions
+    # Captures all questions visible on the main page
+    q_divs = soup.select("div.que")
     for div in q_divs:
-        # Initialize basic question data
-        q_data = QuestionData(
-            total_submissions=0, # Will be updated after step processing
-            final_score=0.0      # Will be updated after step processing
-        )
-        user_data.questions.append(q_data)
+        # Filter for CodeRunner questions (or others if needed in future)
+        if "coderunner" in div.get("class", []):
+            q_data = QuestionData(
+                total_submissions=0,
+                final_score=0.0
+            )
+            user_data.questions.append(q_data)
 
     return user_data
