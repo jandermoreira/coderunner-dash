@@ -1,22 +1,17 @@
 """
-MoodleScraper Module (Async Version with Incremental Step Fetching)
-===================================================================
-Orchestrates the fetching of student data.
-Strategy:
-1. Fetch all student main pages in parallel.
-2. For each student, identify missing steps (incremental diff).
-3. Fetch missing steps sequentially (to avoid hammering server per student).
-4. Merge new steps with cached steps.
+MoodleScraper Module
+====================
+Orchestrates student data recovery with a focus on incremental history fetching.
+All internal documentation and comments are in English as requested.
 """
 
 import streamlit as st
 import httpx
 import asyncio
 from bs4 import BeautifulSoup
-from typing import List, Optional, Dict
+from typing import List, Optional, Set
 
-# Imports dos seus módulos locais
-from models.quiz_models import UserQuizData, QuestionData, SubmissionStep
+from models.quiz_models import UserQuizData, SubmissionStep
 from scraper.parser import (
     parse_student_page,
     extract_available_steps,
@@ -28,197 +23,154 @@ class MoodleScraper:
         self.username = username
         self.password = password
         self.base_url = "https://ava.ufscar.br"
-
-        self.client = httpx.AsyncClient(
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-            },
+        # persistent client for connection pooling
+        self.http_session = httpx.AsyncClient(
+            headers={"User-Agent": "MoodleAnalyticsBot/1.0"},
             follow_redirects=True,
             timeout=60.0
         )
 
     async def login(self) -> bool:
-        """Autenticação padrão no Moodle."""
+        """Authenticates the session using Moodle's login form tokens."""
         try:
-            login_url = f"{self.base_url}/login/index.php"
-            resp = await self.client.get(login_url)
-            soup = BeautifulSoup(resp.text, "html.parser")
-            token = soup.find("input", {"name": "logintoken"})
-            if not token:
+            login_endpoint = f"{self.base_url}/login/index.php"
+            initial_page = await self.http_session.get(login_endpoint)
+            login_soup = BeautifulSoup(initial_page.text, "html.parser")
+
+            login_token = login_soup.find("input", {"name": "logintoken"})
+            if not login_token:
                 return False
 
-            payload = {
+            credentials_payload = {
                 "username": self.username,
                 "password": self.password,
-                "logintoken": token["value"]
+                "logintoken": login_token["value"]
             }
-            r2 = await self.client.post(login_url, data=payload)
-            return "logout.php" in r2.text or "Painel" in r2.text
-        except Exception as e:
-            st.error(f"Login failed: {e}")
+
+            auth_response = await self.http_session.post(login_endpoint, data=credentials_payload)
+            # Login is successful if we see the session key or logout link
+            return "sesskey" in auth_response.text or "login/logout.php" in auth_response.text
+        except Exception as auth_error:
+            st.error(f"Authentication Error: {auth_error}")
             return False
 
-    def _get_cached_student(self, username: str) -> Optional[UserQuizData]:
-        """Recover cached data."""
-        if "raw_data" in st.session_state and st.session_state.raw_data:
-            for user in st.session_state.raw_data:
-                # Verifica se é um objeto UserQuizData e não uma string/lixo
-                if hasattr(user, 'username') and not isinstance(user, str):
-                    if user.username == username:
-                        return user
+    def _get_student_from_cache(self, student_name: str) -> Optional[UserQuizData]:
+        """Checks session state for existing data to skip already downloaded steps."""
+        if "raw_data" in st.session_state:
+            for cached_student in st.session_state.raw_data:
+                if hasattr(cached_student, 'username') and cached_student.username == student_name:
+                    return cached_student
         return None
 
-    async def fetch_step_data(self, url: str, timestamp) -> Optional[SubmissionStep]:
-        """Baixa e processa um único step."""
+    async def fetch_student_full_history(self, student_name: str, review_url: str, ui_status) -> UserQuizData:
+        """
+        Deep dives into a student's attempt to retrieve every submission step.
+        """
         try:
-            resp = await self.client.get(url)
-            return parse_step_detail(resp.text, timestamp)
-        except Exception as e:
-            print(f"Error fetching step {url}: {e}")
-            return None
+            # 1. Fetch the main review page to get the question layout
+            review_response = await self.http_session.get(review_url)
+            student_quiz_record = parse_student_page(review_response.text, student_name)
 
-    def _update_question_summary(self, question: QuestionData):
-        """
-        Atualiza os campos de resumo (nota final, resultados atuais)
-        baseado no ÚLTIMO step da lista cronológica.
-        """
-        if not question.steps:
-            return
+            cached_record = self._get_student_from_cache(student_name)
+            review_soup = BeautifulSoup(review_response.text, "html.parser")
+            question_blocks = review_soup.select("div.que.coderunner")
 
-        # Ordena garantidamente por timestamp
-        question.steps.sort(key=lambda x: x.timestamp)
+            for index, question_div in enumerate(question_blocks):
+                if index >= len(student_quiz_record.questions):
+                    break
 
-        # Pega o estado mais recente
-        last_step = question.steps[-1]
+                target_question = student_quiz_record.questions[index]
+                # Discover steps metadata (IDs, URLs, timestamps) from the history table
+                available_steps_meta = extract_available_steps(question_div)
 
-        question.final_score = last_step.score
-        question.test_results = last_step.test_results
-        question.total_submissions = len(question.steps)
+                existing_steps: List[SubmissionStep] = []
+                known_timestamps: Set = set()
 
-        # Opcional: Recalcular métricas de tinkering aqui ou deixar para metrics.py
-        # question.has_tinkering = len(question.steps) >= 4 (exemplo)
+                if cached_record and index < len(cached_record.questions):
+                    existing_steps = cached_record.questions[index].steps
+                    known_timestamps = {step.timestamp for step in existing_steps}
 
-    async def fetch_student_details(self, name, review_url, status_container):
-        """
-        Processa um aluno individualmente:
-        1. Baixa página principal.
-        2. Identifica steps faltantes.
-        3. Baixa steps faltantes.
-        4. Mescla com cache.
-        """
-        full_review_url = review_url if review_url.startswith("http") else f"{self.base_url}{review_url}"
+                # Download only the steps missing from our local history
+                newly_discovered_steps = []
+                for step_meta in available_steps_meta:
+                    if step_meta["timestamp"] not in known_timestamps:
+                        # Fetch specific step detail page
+                        step_detail_response = await self.http_session.get(step_meta["url"])
+                        parsed_step = parse_step_detail(step_detail_response.text, step_meta["timestamp"])
+                        if parsed_step:
+                            newly_discovered_steps.append(parsed_step)
 
-        # 1. Baixa a página principal de revisão
-        resp = await self.client.get(full_review_url)
-        html = resp.text
+                # Consolidate and sort chronologically
+                total_history = existing_steps + newly_discovered_steps
+                target_question.steps = sorted(total_history, key=lambda s: s.timestamp)
 
-        # Parser inicial (cria esqueleto do UserQuizData e Questions)
-        new_user_data = parse_student_page(html, name)
+                # Sync final question status with the most recent step
+                if target_question.steps:
+                    most_recent_step = target_question.steps[-1]
+                    target_question.final_score = most_recent_step.score
+                    target_question.test_results = most_recent_step.test_results
+                    target_question.total_submissions = len(target_question.steps)
 
-        # Recupera cache antigo para este aluno
-        cached_user = self._get_cached_student(name)
+            if ui_status:
+                ui_status.write(f"🟢 {student_name}: History Synchronized")
+            return student_quiz_record
 
-        # Parse manual para encontrar as DIVs das questões e extrair metadados
-        soup = BeautifulSoup(html, "html.parser")
-        question_divs = soup.select("div.que.coderunner")
+        except Exception as student_fetch_error:
+            if ui_status:
+                ui_status.write(f"🔴 {student_name}: Fetch failed ({student_fetch_error})")
+            return UserQuizData(username=student_name)
 
-        # Itera sobre cada questão encontrada
-        for idx, q_div in enumerate(question_divs):
-            if idx >= len(new_user_data.questions):
-                break
+    async def run(self, quiz_id: str, status_container=None) -> List[UserQuizData]:
+        """Orchestrates the discovery of students and triggers their history fetch."""
+        # Simplified URL to avoid filter-based empty states
+        report_overview_url = f"{self.base_url}/mod/quiz/report.php?id={quiz_id}&mode=overview"
+        report_page_response = await self.http_session.get(report_overview_url)
+        report_soup = BeautifulSoup(report_page_response.text, "html.parser")
 
-            current_question = new_user_data.questions[idx]
-
-            # 2. Descobre todos os steps disponíveis no Moodle agora
-            available_steps_meta = extract_available_steps(q_div)
-
-            # Recupera steps que já tínhamos em cache
-            existing_steps = []
-            known_timestamps = set()
-
-            if cached_user and idx < len(cached_user.questions):
-                existing_steps = cached_user.questions[idx].steps
-                # Criamos um set de timestamps para identificar duplicatas
-                # (Assumindo que timestamp é único por tentativa)
-                known_timestamps = {s.timestamp for s in existing_steps}
-
-            # 3. Identifica quais steps são NOVOS
-            steps_to_fetch = []
-            for meta in available_steps_meta:
-                if meta["timestamp"] not in known_timestamps:
-                    steps_to_fetch.append(meta)
-
-            # 4. Baixa APENAS os steps novos (Sequencial, conforme solicitado)
-            new_steps_objects = []
-            for meta in steps_to_fetch:
-                # Opcional: Feedback visual se houver muitos downloads
-                # if status_container: status_container.write(f"Baixando step novo para {name}...")
-
-                step_obj = await self.fetch_step_data(meta["url"], meta["timestamp"])
-                if step_obj:
-                    new_steps_objects.append(step_obj)
-
-            # 5. Consolidação (Merge)
-            # Soma antigos + novos
-            all_steps = existing_steps + new_steps_objects
-
-            # Atribui à questão
-            current_question.steps = all_steps
-
-            # Atualiza os dados de resumo (Nota final, Testes atuais) baseado no último step
-            self._update_question_summary(current_question)
-
-        return new_user_data
-
-    async def run(self, quiz_id, status_container=None) -> List[UserQuizData]:
-        """Ponto de entrada principal."""
-        if not await self.login():
-            st.error("Login falhou.")
+        student_table = report_soup.select_one("table#attempts, table.generaltable")
+        if not student_table:
             return []
 
-        # URL do relatório geral (lista de alunos)
-        report_url = (
-            f"{self.base_url}/mod/quiz/report.php?id={quiz_id}"
-            "&mode=overview&attempts=enrolled_with&onlygraded"
-            "&onlyregraded&slotmarks=1&tsort=firstname&tdir=3"
-            "&states=inprogress-finished"
-        )
-        print(report_url)
+        all_fetch_tasks = []
+        table_rows = student_table.select("tbody tr")
 
-        resp = await self.client.get(report_url)
-        soup = BeautifulSoup(resp.text, "html.parser")
+        for row in table_rows:
+            row_cells = row.find_all("td")
+            if len(row_cells) < 3:
+                continue
 
-        table = soup.select_one("table#attempts, table.generaltable")
-        if not table:
-            st.error("Tabela de resultados não encontrada.")
+            # Robust search for the "Review attempt" link across all columns
+            active_review_url = None
+            student_display_name = "Unknown"
+
+            for cell in row_cells:
+                link_tag = cell.find("a", href=lambda h: h and "review.php" in h)
+                if link_tag:
+                    active_review_url = link_tag["href"]
+                    # Clean the student name from the link text or cell content
+                    student_display_name = cell.get_text(strip=True).replace("Revisão de tentativa", "").strip()
+                    break
+
+            if active_review_url:
+                # Ensure the URL is absolute for httpx
+                if not active_review_url.startswith("http"):
+                    active_review_url = f"{self.base_url}/mod/quiz/{active_review_url}"
+
+                all_fetch_tasks.append(
+                    self.fetch_student_full_history(
+                        student_display_name,
+                        active_review_url,
+                        status_container
+                    )
+                )
+
+        if not all_fetch_tasks:
             return []
 
-        tasks = []
-        rows = table.select("tbody tr")
-
-        # Cria tasks para cada aluno (PARALELO)
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) < 3: continue
-
-            link = cols[2].find("a", href=lambda h: h and "review.php" in h)
-            if not link: continue
-
-            name = cols[2].get_text(strip=True).replace("Revisão de tentativa", "")
-
-            tasks.append(
-                self.fetch_student_details(name, link["href"], status_container)
-            )
-
-        if status_container:
-            status_container.write(f"🔄 Sincronizando {len(tasks)} alunos...")
-
-        # Executa todos os alunos simultaneamente
-        results = await asyncio.gather(*tasks)
-
-        await self.client.aclose()
-        return results
+        # Concurrently fetch all student details
+        results = await asyncio.gather(*all_fetch_tasks)
+        return list(results)
 
     async def close(self):
-        """Finaliza o cliente HTTP de forma segura."""
-        await self.client.aclose()
+        """Cleanly closes the underlying HTTP transport."""
+        await self.http_session.aclose()
