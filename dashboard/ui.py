@@ -262,48 +262,59 @@ css = """
 #     """, unsafe_allow_html=True)
 
 def render_student(quiz_id, student_list, stats_df):
-    for idx, student in enumerate(student_list):
-        with stylable_container(key=f"card_{student}_{idx}", css_styles=css):
-            student_stats = stats_df[stats_df["Student"] == student]
+    """
+    Renders detailed view for a specific student, including timeline of steps.
+    """
+    selected_student = st.selectbox("Select student for details:", student_list)
 
-            # Alert box
-            alerts = {}
-            student_extra_details = {}
+    # Get the rich object from session state
+    user_data = next((u for u in st.session_state.raw_data if u.username == selected_student), None)
 
-            quiz_end_timestamp = student_stats.filter(like="End time")
-
-            numeric_timestamp = pd.to_numeric(quiz_end_timestamp.iloc[:, 0]).iloc[0]
-            if numeric_timestamp > 0:
-                col = pd.to_datetime(quiz_end_timestamp.iloc[:, 0])
-                alerts["Finished"] = col.dt.strftime("%d/%m %H:%M").iloc[0]
+    if user_data:
+        # Header Metrics using the object directly (safer than Pandas iloc)
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            start_str = user_data.quiz_start_timestamp.strftime(
+                "%H:%M:%S") if user_data.quiz_start_timestamp else "N/A"
+            st.metric("Started at", start_str)
+        with m2:
+            if user_data.quiz_start_timestamp and user_data.quiz_end_timestamp:
+                duration = user_data.quiz_end_timestamp - user_data.quiz_start_timestamp
+                st.metric("Duration", format_timedelta(duration))
             else:
-                student_extra_details["Status"] = "In progress"
+                st.metric("Duration", "In Progress")
+        with m3:
+            total_steps = sum(len(q.steps) for q in user_data.questions)
+            st.metric("Total Submissions", total_steps)
 
-            total_regressions = int(
-                student_stats.filter(like="Regressions").sum(axis=1).values[0])
-            if total_regressions > 0:
-                alerts["Regressions"] = total_regressions
+        st.divider()
 
-            tinkering_columns = student_stats.filter(like="has_tinkering")
-            is_tinkering = tinkering_columns.any(axis=1).iloc[0]
-            if is_tinkering:
-                alerts["Trial and error"] = "Alert"
+        # Step Timeline per Question
+        st.subheader("Submission Timeline")
+        for q_idx, question in enumerate(user_data.questions):
+            with st.expander(f"Question {q_idx + 1} - Evolution History", expanded=False):
+                if not question.steps:
+                    st.info("No submission steps recorded for this question.")
+                    continue
 
-            if len(alerts) > 0:
-                column1, column2 = st.columns([3, 1])
-                with column1:
-                    st.markdown(f"#### {student}")
-                    render_student_details(student_stats, student_extra_details)
-                    render_student_evolution(quiz_id, student, idx)
+                # Display steps in a scannable list
+                for s_idx, step in enumerate(question.steps):
+                    cols = st.columns([1, 2, 4])
+                    with cols[0]:
+                        st.write(f"**Step {s_idx + 1}**")
+                    with cols[1]:
+                        # Color coding based on score
+                        color = "green" if step.score >= 100 else "orange" if step.score > 0 else "red"
+                        st.markdown(f":{color}[Score: {step.score:.1f}]")
+                    with cols[2]:
+                        ts = step.timestamp.strftime("%H:%M:%S")
 
-                with column2:
-                    for title, value in alerts.items():
-                        st.metric(title, value)
-            else:
-                st.markdown(f"##### {student}")
-                render_student_details(student_stats, student_extra_details)
-                render_student_evolution(quiz_id, student, idx)
-            st.text("")
+                        # Detect syntax error for visual feedback
+                        is_syntax = any(t.is_compilation_error for t in step.test_results)
+                        msg = ("⚠️ Syntax Error"
+                               if is_syntax
+                               else f"Passed {sum(1 for t in step.test_results if t.passed)}/{len(step.test_results)} tests")
+                        st.write(f"at {ts} — {msg}")
 
 
 def render_detailed_test_grid(raw_data):
@@ -349,14 +360,13 @@ def run_dashboard():
         sync_with_moodle(username, password, quiz_id)
 
     if isinstance(st.session_state.raw_data, list) and st.session_state.raw_data:
-        history_path = get_history_path(quiz_id)
-        history_data = None
-        if os.path.exists(history_path):
-            with open(history_path, "rb") as f:
-                history_data = pickle.load(f)
+        # history_path = get_history_path(quiz_id)
+        # history_data = None
+        # if os.path.exists(history_path):
+        #     with open(history_path, "rb") as f:
+        #         history_data = pickle.load(f)
 
-        stats_df, common_errors = calculate_analytics(st.session_state.raw_data,
-                                                      history=history_data)
+        stats_df, common_errors = calculate_analytics(st.session_state.raw_data)
 
         # if not common_errors.empty:
         #     st.subheader("🚨 Most Common Failures")

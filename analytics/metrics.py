@@ -1,8 +1,11 @@
 """
 Analytics and Metrics Calculation Module
 =========================================
-
-This module processes raw quiz data and history into structured analytics.
+Processes UserQuizData containing SubmissionSteps to compute:
+1. Performance per question (%)
+2. Regression counts (using internal step history)
+3. Technical Noise (ratio of compilation errors)
+4. Tinkering behavior
 """
 
 import collections
@@ -10,35 +13,28 @@ import pandas as pd
 from typing import List, Dict, Any
 from models.quiz_models import UserQuizData
 
-
 def count_regressions_with_forgiveness(test_history: List[bool]) -> int:
     """
-    Counts how many times a test went from Passed (True) to Failed (False).
-    Returns 0 if the last 4 attempts were successful (Forgiveness Rule).
+    Counts transitions from Passed (True) to Failed (False).
+    Forgiveness: Returns 0 if the last 3 attempts were successful.
     """
     if len(test_history) < 2:
         return 0
 
-    # Forgiveness Rule: If last 4 attempts are True, ignore previous regressions
-    recent_attempts = test_history[-4:]
-    if all(recent_attempts) and len(recent_attempts) >= 4:
+    # Rule: If the student fixed it and kept it fixed, ignore past instability
+    if all(test_history[-3:]) and len(test_history) >= 3:
         return 0
 
     regressions = 0
     for i in range(1, len(test_history)):
         if test_history[i - 1] is True and test_history[i] is False:
             regressions += 1
-
     return regressions
 
-
-def calculate_analytics(current_results: List[UserQuizData], history: List[Dict[str, Any]] = None):
+def calculate_analytics(current_results: List[UserQuizData]):
     """
-    Processes quiz data and history to compute:
-    1. Performance per question (%)
-    2. Regression counts (instability)
-    3. Tinkering behavior (excessive trial and error)
-    4. Global failure patterns
+    Main entry point for UI data generation.
+    Now uses the internal 'steps' of each question for timeline analysis.
     """
     flat_data = []
     failure_patterns = collections.defaultdict(int)
@@ -46,42 +42,60 @@ def calculate_analytics(current_results: List[UserQuizData], history: List[Dict[
     for user in current_results:
         entry = {
             "Student": user.username,
-            "Start time": user.quiz_start_timestamp,
-            "End time": user.quiz_end_timestamp
+            "Total Score": sum(q.final_score for q in user.questions) / len(user.questions) if user.questions else 0
         }
 
-        for question_idx, question in enumerate(user.questions):
-            entry[f"Q{question_idx + 1} (%)"] = question.final_score
+        for q_idx, question in enumerate(user.questions):
+            q_label = f"Q{q_idx + 1}"
+            entry[f"{q_label} (%)"] = question.final_score
 
-            # Regression logic
-            q_regressions = 0
-            if history:
-                for t_idx in range(len(question.test_results)):
+            # --- 1. Internal Regression Analysis ---
+            total_q_regressions = 0
+            # We need to pivot the steps to see the history of each specific test case
+            if question.steps:
+                # Number of test cases in the latest attempt
+                num_tests = len(question.test_results)
+
+                for t_idx in range(num_tests):
+                    # Build the timeline for THIS specific test across all steps
                     test_timeline = []
-                    for snap in history:
-                        u_snap = next((s for s in snap["data"]
-                                       if s.username == user.username), None)
-                        if u_snap and question_idx < len(u_snap.questions):
-                            snap_q = u_snap.questions[question_idx]
-                            if t_idx < len(snap_q.test_results):
-                                test_timeline.append(snap_q.test_results[t_idx].passed)
+                    for step in question.steps:
+                        if t_idx < len(step.test_results):
+                            test_timeline.append(step.test_results[t_idx].passed)
 
-                    q_regressions += count_regressions_with_forgiveness(test_timeline)
+                    total_q_regressions += count_regressions_with_forgiveness(test_timeline)
 
-            entry[f"Q{question_idx + 1} Regressions"] = q_regressions
+            entry[f"{q_label} Regressions"] = total_q_regressions
 
-            # Tinkering
-            entry[f"Q{question_idx + 1} has_tinkering"] = question.has_tinkering
+            # --- 2. Technical Noise ---
+            # Ratio of steps that didn't even compile
+            comp_errors = sum(1 for s in question.steps if any(t.is_compilation_error for t in s.test_results))
+            entry[f"{q_label} Noise"] = round(comp_errors / len(question.steps), 2) if question.steps else 0
 
-            # Global pattern tracking
+            # --- 3. Tinkering Detection ---
+            # Flag if submissions are too frequent (e.g., more than 5 steps)
+            entry[f"{q_label} has_tinkering"] = len(question.steps) >= 5
+
+            # --- 4. Global Failure Patterns (for the bar chart) ---
             for t_idx, test in enumerate(question.test_results):
                 if not test.passed:
-                    failure_patterns[f"Q{question_idx + 1}-T{t_idx + 1}"] += 1
+                    failure_patterns[f"{q_label}-T{t_idx + 1}"] += 1
+
+        # Calculate Intervention Priority
+        # High priority if regressions > 2 OR noise > 50% on a failed question
+        entry["Priority"] = "Low"
+        for q_idx in range(len(user.questions)):
+            reg = entry.get(f"Q{q_idx+1} Regressions", 0)
+            score = entry.get(f"Q{q_idx+1} (%)", 100)
+            if reg > 2 or (score < 100 and entry.get(f"Q{q_idx+1} Noise", 0) > 0.5):
+                entry["Priority"] = "High"
+                break
 
         flat_data.append(entry)
 
     df = pd.DataFrame(flat_data)
-    series_failures = pd.Series(failure_patterns).sort_values(
-        ascending=False) if failure_patterns else pd.Series()
+
+    # Sort failure patterns for the UI
+    series_failures = pd.Series(failure_patterns).sort_values(ascending=False) if failure_patterns else pd.Series()
 
     return df, series_failures
