@@ -187,7 +187,7 @@ with st.sidebar:
     st.header("Settings")
     u_val = st.text_input("User", value=os.getenv("MOODLE_USER", ""))
     p_val = st.text_input("Pass", type="password", value=os.getenv("MOODLE_PASS", ""))
-    q_val = st.text_input("Quiz ID", value=os.getenv("MOODLE_QUIZ_ID", "958257"))
+    q_val = st.text_input("Quiz ID", value=os.getenv("QUIZ_ID", "958257"))
     if st.button("🚀 Sync Now"):
         st.session_state.raw_data = "loading"  # Temporary flag
 

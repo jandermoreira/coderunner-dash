@@ -51,10 +51,10 @@ def calculate_analytics(current_results: List[UserQuizData]):
 
             # --- 1. Internal Regression Analysis ---
             total_q_regressions = 0
-            # We need to pivot the steps to see the history of each specific test case
+
             if question.steps:
-                # Number of test cases in the latest attempt
-                num_tests = len(question.test_results)
+                latest_step = question.steps[-1]
+                num_tests = len(latest_step.test_results)
 
                 for t_idx in range(num_tests):
                     # Build the timeline for THIS specific test across all steps
@@ -68,21 +68,23 @@ def calculate_analytics(current_results: List[UserQuizData]):
             entry[f"{q_label} Regressions"] = total_q_regressions
 
             # --- 2. Technical Noise ---
-            # Ratio of steps that didn't even compile
-            comp_errors = sum(1 for s in question.steps if any(t.is_compilation_error for t in s.test_results))
+            comp_errors = sum(
+                1 for s in question.steps
+                if any(t.is_compilation_error for t in s.test_results)
+            )
             entry[f"{q_label} Noise"] = round(comp_errors / len(question.steps), 2) if question.steps else 0
 
             # --- 3. Tinkering Detection ---
-            # Flag if submissions are too frequent (e.g., more than 5 steps)
             entry[f"{q_label} has_tinkering"] = len(question.steps) >= 5
 
             # --- 4. Global Failure Patterns (for the bar chart) ---
-            for t_idx, test in enumerate(question.test_results):
-                if not test.passed:
-                    failure_patterns[f"{q_label}-T{t_idx + 1}"] += 1
+            latest_step = question.steps[-1] if question.steps else None
+            if latest_step:
+                for t_idx, test in enumerate(latest_step.test_results):
+                    if not test.passed:
+                        failure_patterns[f"{q_label}-T{t_idx + 1}"] += 1
 
         # Calculate Intervention Priority
-        # High priority if regressions > 2 OR noise > 50% on a failed question
         entry["Priority"] = "Low"
         for q_idx in range(len(user.questions)):
             reg = entry.get(f"Q{q_idx+1} Regressions", 0)
@@ -94,8 +96,6 @@ def calculate_analytics(current_results: List[UserQuizData]):
         flat_data.append(entry)
 
     df = pd.DataFrame(flat_data)
-
-    # Sort failure patterns for the UI
     series_failures = pd.Series(failure_patterns).sort_values(ascending=False) if failure_patterns else pd.Series()
 
     return df, series_failures

@@ -1,86 +1,65 @@
 """
-UI
+Data management
 ==============================
-
-This module handles UI.
 """
+
 import asyncio
 import os
 import pickle
 from datetime import datetime
-
 import streamlit as st
-
-import pandas as pd
-import plotly.express as px
-from streamlit_autorefresh import st_autorefresh
-
 from scraper.moodle_scraper import MoodleScraper
 
-
-# def get_history_path(quiz_id):
-#     return f"history_{quiz_id}.pkl"
-
-
-# def save_history_snapshot(quiz_id, data):
-#     """Appends current data as a timestamped snapshot in the history file."""
-#     path = get_history_path(quiz_id)
-#     history = []
-#
-#     if os.path.exists(path):
-#         with open(path, "rb") as f:
-#             history = pickle.load(f)
-#
-#     snapshot = {"timestamp": datetime.now(), "data": data}
-#     history.append(snapshot)
-#
-#     with open(path, "wb") as f:
-#         pickle.dump(history, f)
-
-
 def reset_local_cache(quiz_id):
-    """Deletes the local cache file for the specific quiz."""
     cache_path = f"quiz_{quiz_id}_cache.pkl"
     if os.path.exists(cache_path):
         os.remove(cache_path)
         return True, f"History for Quiz {quiz_id} deleted."
-    else:
-        return False, "No history file found to delete."
-
+    return False, "No history file found."
 
 def load_local_cache(quiz_id):
     cache_path = f"quiz_{quiz_id}_cache.pkl"
     if os.path.exists(cache_path):
         with open(cache_path, "rb") as f:
-            st.session_state.raw_data = pickle.load(f)
+            cache = pickle.load(f)
+            if isinstance(cache, dict) and "data" in cache:
+                st.session_state.raw_data = cache["data"]
+                st.session_state.steps_urls = cache.get("steps_urls", set())
+            else:
+                st.session_state.raw_data = cache
+                st.session_state.steps_urls = set()
             st.session_state.last_sync = "Cached data"
         st.success("Data loaded from local cache!")
-        # st.rerun()
     else:
         st.error("Cache file not found.")
 
-
 def sync_with_moodle(user, password, quiz_id):
-    with st.status("Connecting and extracting data from Moodle...", expanded=True) as status:
+    with st.status("Connecting and extracting data...", expanded=True) as status:
         fetched_data = asyncio.run(run_scraper_async(user, password, quiz_id, status))
 
         if fetched_data:
             st.session_state.raw_data = fetched_data
             st.session_state.last_sync = datetime.now().strftime('%H:%M:%S')
 
+            cache_to_save = {
+                "data": fetched_data,
+                "steps_urls": st.session_state.get("steps_urls", set())
+            }
             with open(f"quiz_{quiz_id}_cache.pkl", "wb") as f:
-                pickle.dump(fetched_data, f)
-
-            # save_history_snapshot(quiz_id, fetched_data)
+                pickle.dump(cache_to_save, f)
             st.rerun()
         else:
-            st.session_state.raw_data = None
-            status.update(label="No data found.", state="error")
-
+            status.update(label="Sync failed.", state="error")
 
 async def run_scraper_async(user, password, quiz_id, status_box):
-    scraper = MoodleScraper(user, password)
+    # Ensure we get the latest data from session state to pass to the scraper
+    cached_steps = st.session_state.get("steps_urls", set())
+    existing_data = st.session_state.get("raw_data", None)
+
+    scraper = MoodleScraper(user, password, cached_steps)
     try:
-        return await scraper.run(quiz_id, status_box)
+        result = await scraper.run(quiz_id, status_box, existing_data=existing_data)
+        st.session_state.steps_urls = scraper.steps_urls
+        return result
     finally:
         await scraper.close()

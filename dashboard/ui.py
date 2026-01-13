@@ -5,11 +5,12 @@ UI Module
 This module implements the dashboard user interface for the CodeRunner Monitoring System.
 It provides instructors with real-time insights into student submission patterns.
 """
-
 from analytics.metrics import calculate_analytics
 from dashboard.data_management import *
 from analytics.pipeline import run_pedagogical_pipeline
-from models.quiz_models import InterventionType, ProgressState
+from models.quiz_models import InterventionType
+from streamlit_extras.stylable_container import stylable_container
+from streamlit_autorefresh import st_autorefresh
 
 def format_timedelta(td):
     """Formats timedelta into readable strings."""
@@ -24,6 +25,7 @@ def format_timedelta(td):
         return f"+{minutes}:{seconds:02}"
     else:
         return f"+{seconds}s"
+
 
 def render_sidebar():
     """
@@ -76,7 +78,74 @@ def render_sidebar():
 
     return user, pw, qid
 
-def render_pedagogical_alerts(enriched_data):
+
+# Mapeamento de estilos por tipo de intervenção
+INTERVENTION_STYLES = {
+    InterventionType.INTERVENE_NOW: {
+        "color": "#FF4B4B",  # Vermelho
+        "icon": "🚨",
+        "title": "Need intervention",
+        "bg_opacity": "15"  # Hex para ~8% opacidade
+    },
+    InterventionType.MONITOR: {
+        "color": "#FFAA00",  # Amarelo/Laranja
+        "icon": "⚠️",
+        "title": "Under Observation",
+        "bg_opacity": "40"
+    },
+    InterventionType.TECHNICAL: {
+        "color": "#007BFF",  # Azul
+        "icon": "🔧",
+        "title": "Technical Issues",
+        "bg_opacity": "40"
+    },
+    InterventionType.NONE: {
+        "color": "#28A745",  # Verde
+        "icon": "✅",
+        "title": "Consistent Progress",
+        "bg_opacity": "40"
+    }
+}
+
+
+def render_intervention_section(enriched_data, intervention_type, title, st_method, empty_msg=None):
+    """
+    Generic renderer for different types of pedagogical interventions.
+    """
+    st.markdown(f"##### {title}")
+    number_columns = 3
+    cols = st.columns(number_columns)
+    count = 0
+
+    for student in enriched_data:
+        for question in student.questions:
+            # Filtra pelo tipo de intervenção passado no parâmetro
+            if question.decision.intervention == intervention_type:
+                with cols[count % number_columns]:
+                    style = INTERVENTION_STYLES.get(intervention_type)
+                    with stylable_container(
+                            key=f"container_{intervention_type}_{student.username}_{count}",
+                            css_styles=f"""
+                                {{
+                                    border: 2px solid {style['color']};
+                                    border-radius: 8px;
+                                    padding: 15px;
+                                    background-color: {style['color']}{style['bg_opacity']};
+                                    margin-bottom: 10px;
+                                }}
+                            """,
+                    ):
+                        st.markdown(f"**{student.username}**")
+                        st.text(question.decision.justification)
+                count += 1
+
+    if count == 0 and empty_msg:
+        st.write(empty_msg)
+
+    return count
+
+
+def render_intervene_alerts(enriched_data):
     """Renders high-priority intervention alerts."""
     st.subheader("🚨 Priority Interventions")
     alert_cols = st.columns(4)
@@ -91,6 +160,7 @@ def render_pedagogical_alerts(enriched_data):
 
     if alert_count == 0:
         st.success("No critical logical interventions detected.")
+
 
 def run_dashboard():
     """Main dashboard entry point."""
@@ -111,7 +181,40 @@ def run_dashboard():
         stats_df, _ = calculate_analytics(st.session_state.raw_data)
 
         # UI Components
-        render_pedagogical_alerts(enriched_data)
+        intervention_items = [
+            {
+                "type": InterventionType.INTERVENE_NOW,
+                "title": "🚨 Priority Interventions",
+                "st_element": st.error,
+                "empty_message": "No critical logical interventions detected."
+            },
+            {
+                "type": InterventionType.MONITOR,
+                "title": "⚠️ Students to Monitor",
+                "st_element": st.warning,
+                "empty_message": "No one currently require monitoring."
+            },
+            {
+                "type": InterventionType.TECHNICAL,
+                "title": "🔧 Technical Issues",
+                "st_element": st.info,
+                "empty_message": "No techical issues"
+            },
+            {
+                "type": InterventionType.NONE,
+                "title": "✅ Consistent Progress",
+                "st_element": st.success,
+                "empty_message": "No one is in consistent progress!"
+            }
+        ]
+        for item in intervention_items:
+            render_intervention_section(
+                enriched_data,
+                item["type"],
+                item["title"],
+                item["st_element"],
+                item["empty_message"]
+            )
 
         st.divider()
         st.subheader("Class Progress")
@@ -120,6 +223,7 @@ def run_dashboard():
 
     else:
         st.info("Awaiting data. Please check credentials and Sync.")
+
 
 if __name__ == "__main__":
     run_dashboard()
