@@ -42,7 +42,7 @@ def load_local_cache(quiz_id):
 
 def sync_with_moodle(user, password, quiz_id):
     """Triggers the incremental sync process."""
-    with st.status("Syncing with Moodle...", expanded=True) as status:
+    with st.status("Syncing with Moodle...", expanded=False) as status:
         fetched_data, updated_steps_urls = asyncio.run(run_scraper_async(user, password, quiz_id, status))
 
         if isinstance(fetched_data, list):
