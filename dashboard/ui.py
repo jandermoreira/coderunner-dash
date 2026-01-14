@@ -73,7 +73,7 @@ def render_sidebar():
             st_autorefresh(interval=sync_interval * 60 * 1000, key="moodle_sync_timer")
 
         if st.button("🚀 Sync Now", width='stretch', type="primary"):
-            st.session_state.raw_data = "loading"
+            st.session_state.sync_requested = True
             st.rerun()
 
     return user, pw, qid
@@ -169,11 +169,15 @@ def run_dashboard():
         st.session_state.raw_data = None
     if 'last_sync' not in st.session_state:
         st.session_state.last_sync = "Never"
+    if 'sync_requested' not in st.session_state:
+        st.session_state.sync_requested = False
 
     username, password, quiz_id = render_sidebar()
 
-    if st.session_state.raw_data == "loading":
+    if st.session_state.get('sync_requested'):
+        st.session_state.sync_requested = False
         sync_with_moodle(username, password, quiz_id)
+        st.rerun()
 
     if isinstance(st.session_state.raw_data, list) and st.session_state.raw_data:
         # Layered Analysis
