@@ -5,6 +5,7 @@ UI Module
 This module implements the dashboard user interface for the CodeRunner Monitoring System.
 It provides instructors with real-time insights into student submission patterns.
 """
+from datetime import datetime
 
 from analytics.metrics import calculate_analytics
 from dashboard.data_management import *
@@ -27,6 +28,41 @@ def format_timedelta(td):
         return f"+{minutes}:{seconds:02}"
     else:
         return f"+{seconds}s"
+
+
+from pprint import pprint
+
+
+def render_top_indicators(data):
+    indicators = {
+        "Students": len(data),
+        "Questions": len(data[0].questions),
+    }
+
+    intervene_now = sum([
+        int(len([
+            question.decision.intervention
+            for question in student.questions
+            if question.decision.intervention == InterventionType.INTERVENE_NOW
+        ]) > 0) for student in data
+    ])
+    if intervene_now > 0:
+        indicators["Invervene"] = f"🚨 {intervene_now}"
+
+    technical = sum([
+            int(len([
+                question.decision.intervention
+                for question in student.questions
+                if question.decision.intervention == InterventionType.TECHNICAL
+            ]) > 0) for student in data
+        ])
+    if technical > 0:
+        indicators["Technical"] = f"🔧 {technical}"
+
+    cols = st.columns(len(indicators))
+    for idx, (title, value) in enumerate(indicators.items()):
+        with cols[idx]:
+            st.metric(title, value)
 
 
 def render_sidebar():
@@ -77,6 +113,9 @@ def render_sidebar():
                         if col_no.button("No", width="stretch"):
                             st.session_state.confirm_reset = False
                             st.rerun()
+
+        if st.button("rerun()"):
+            st.rerun()
 
     return user, pw, qid
 
@@ -185,21 +224,21 @@ def render_intervention_section(enriched_data, intervention_type, title, st_meth
     return count
 
 
-def render_intervene_alerts(enriched_data):
-    """Renders high-priority intervention alerts."""
-    st.subheader("🚨 Priority Interventions")
-    alert_cols = st.columns(4)
-    alert_count = 0
-
-    for student in enriched_data:
-        for question in student.questions:
-            if question.decision.intervention == InterventionType.INTERVENE_NOW:
-                with alert_cols[alert_count % 4]:
-                    st.error(f"**{student.username}**\n\n{question.decision.justification}")
-                alert_count += 1
-
-    if alert_count == 0:
-        st.success("No critical logical interventions detected.")
+# def render_intervene_alerts(enriched_data):
+#     """Renders high-priority intervention alerts."""
+#     st.subheader("🚨 Priority Interventions")
+#     alert_cols = st.columns(4)
+#     alert_count = 0
+#
+#     for student in enriched_data:
+#         for question in student.questions:
+#             if question.decision.intervention == InterventionType.INTERVENE_NOW:
+#                 with alert_cols[alert_count % 4]:
+#                     st.error(f"**{student.username}**\n\n{question.decision.justification}")
+#                 alert_count += 1
+#
+#     if alert_count == 0:
+#         st.success("No critical logical interventions detected.")
 
 
 def run_dashboard():
@@ -218,7 +257,7 @@ def run_dashboard():
     if 'raw_data' not in st.session_state:
         st.session_state.raw_data = None
     if 'last_sync' not in st.session_state:
-        st.session_state.last_sync = "Never"
+        st.session_state.last_sync = "N/A"
     if 'sync_requested' not in st.session_state:
         st.session_state.sync_requested = False
 
@@ -227,12 +266,15 @@ def run_dashboard():
     if st.session_state.get('sync_requested'):
         st.session_state.sync_requested = False
         sync_with_moodle(username, password, quiz_id)
+        st.session_state.last_sync = datetime.now().strftime("%d/%m/%Y %H:%M")
         st.rerun()
 
     if isinstance(st.session_state.raw_data, list) and st.session_state.raw_data:
         # Layered Analysis
         enriched_data = run_pedagogical_pipeline(st.session_state.raw_data)
         stats_df, _ = calculate_analytics(st.session_state.raw_data)
+
+        render_top_indicators(enriched_data)
 
         # UI Components
         intervention_items = [
@@ -261,14 +303,15 @@ def run_dashboard():
                 "empty_message": "No one is in consistent progress!"
             }
         ]
-        for item in intervention_items:
-            render_intervention_section(
-                enriched_data,
-                item["type"],
-                item["title"],
-                item["st_element"],
-                item["empty_message"]
-            )
+        with st.container(height=700):
+            for item in intervention_items:
+                render_intervention_section(
+                    enriched_data,
+                    item["type"],
+                    item["title"],
+                    item["st_element"],
+                    item["empty_message"]
+                )
 
         # st.divider()
         # st.subheader("Class Progress")
