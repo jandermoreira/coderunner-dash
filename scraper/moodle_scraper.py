@@ -7,9 +7,9 @@ import streamlit as st
 import httpx
 import asyncio
 from bs4 import BeautifulSoup
-from typing import List, Optional, Set, Dict
+from typing import List, Optional, Set, Tuple
+from models.quiz_models import UserQuizData
 
-from models.quiz_models import UserQuizData, SubmissionStep
 from scraper.parser import (
     parse_student_page,
     extract_available_steps,
@@ -53,30 +53,38 @@ class MoodleScraper:
             return False
 
     async def fetch_student_full_history(self, student_name: str, review_url: str,
-                                         ui_status, existing_user_data: Optional[UserQuizData] = None) -> UserQuizData:
-        """Extracts history and merges with existing data to prevent data loss."""
+                                         ui_status, existing_user_data: Optional[
+                UserQuizData] = None) -> UserQuizData:
+        """Extracts history and merges with existing data to enable incremental updates."""
         try:
-            response = await self.http_session.get(review_url)
+            if ui_status:
+                student_row = ui_status.empty()
+                student_row.write(f"🔄 Searching for {student_name}")
 
-            # Create a fresh parser object for the current page state
+            response = await self.http_session.get(review_url)
             current_page_data = parse_student_page(response.text, student_name)
 
-            # If we have existing data, we use it as the base to preserve metadata
-            # otherwise we use the newly parsed structure
+            # Use existing data object if available to preserve previous state
             final_user_data = existing_user_data if existing_user_data else current_page_data
 
-            # Update quiz timestamps in case they changed or were missing
+            # Update global metadata from the latest scan
             final_user_data.quiz_start_timestamp = current_page_data.quiz_start_timestamp
             final_user_data.quiz_end_timestamp = current_page_data.quiz_end_timestamp
 
             soup = BeautifulSoup(response.text, "html.parser")
             question_blocks = soup.select("div.que.coderunner")
 
-            # Map existing steps by timestamp for this specific student
+            # Index existing steps for fast lookup during the merge
             existing_steps_map = {}
-            for q in final_user_data.questions:
-                for s in q.steps:
-                    existing_steps_map[s.timestamp] = s
+            for question in final_user_data.questions:
+                for step in question.steps:
+                    if hasattr(step, "url") and step.url:
+                        existing_steps_map[step.url] = step
+
+            # No moodle_scraper.py, logo após montar o existing_steps_map:
+            if existing_steps_map:
+                primeira_url = list(existing_steps_map.keys())[0]
+                obj_exemplo = existing_steps_map[primeira_url]
 
             for index, question_div in enumerate(question_blocks):
                 if index >= len(final_user_data.questions):
@@ -85,22 +93,26 @@ class MoodleScraper:
                 current_question = final_user_data.questions[index]
                 steps_metadata = extract_available_steps(question_div)
 
-                new_question_steps = []
+                merged_steps = []
                 for metadata in steps_metadata:
                     step_url = metadata["url"]
                     step_ts = metadata["timestamp"]
+                    step_url = metadata["url"]
 
-                    if step_url in self.steps_urls and step_ts in existing_steps_map:
-                        new_question_steps.append(existing_steps_map[step_ts])
+                    # If step was already downloaded, retrieve it from existing data
+                    if step_url in self.steps_urls and step_url in existing_steps_map:
+                        merged_steps.append(existing_steps_map[step_url])
                     else:
+                        # Caso não exista, baixa e salva a URL no objeto
                         step_response = await self.http_session.get(step_url)
-                        step_obj = parse_step_detail(step_response.text, step_ts)
+                        step_obj = parse_step_detail(step_response.text, step_ts, step_url)
                         if step_obj:
-                            new_question_steps.append(step_obj)
+                            step_obj.url = step_url  # Guarda a URL para a próxima vez
+                            merged_steps.append(step_obj)
                             self.steps_urls.add(step_url)
 
-                # Update the question with the combined list of steps
-                current_question.steps = sorted(new_question_steps, key=lambda s: s.timestamp)
+                # Re-sort and update final status
+                current_question.steps = sorted(merged_steps, key=lambda s: s.timestamp)
                 if current_question.steps:
                     latest = current_question.steps[-1]
                     current_question.final_score = latest.score
@@ -108,25 +120,28 @@ class MoodleScraper:
                     current_question.total_submissions = len(current_question.steps)
 
             if ui_status:
-                ui_status.write(f"🟢 {student_name}: Synchronized")
+                student_row.write(f"🟢 {student_name}: Synchronized")
 
             return final_user_data
 
         except Exception as error:
             if ui_status:
-                ui_status.write(f"🔴 {student_name}: Error ({error})")
+                student_row.write(f"🔴 {student_name}: Error ({error})")
             return existing_user_data if existing_user_data else UserQuizData(username=student_name)
 
-    async def run(self, quiz_id: str, status_container=None, existing_data: List[UserQuizData] = None) -> List[UserQuizData]:
-        """Orchestrates the scraping process."""
+    async def run(self, quiz_id: str, status_container=None,
+                  existing_data: List[UserQuizData] = None
+                  ) -> Tuple[List[UserQuizData], Set[str]]:
+        """Orchestrates the incremental scraping process for all students."""
         if not await self.login():
             return []
 
+        # Map existing students for fast access
         existing_data_map = {}
-        if existing_data and isinstance(existing_data, list):
-            for u in existing_data:
-                if hasattr(u, "username"):
-                    existing_data_map[u.username] = u
+        if existing_data:
+            for user in existing_data:
+                if hasattr(user, "username"):
+                    existing_data_map[user.username] = user
 
         report_url = f"{self.base_url}/mod/quiz/report.php?id={quiz_id}&mode=overview"
         response = await self.http_session.get(report_url)
@@ -151,7 +166,11 @@ class MoodleScraper:
                 clean_name, link_tag["href"], status_container, existing_data_map.get(clean_name)
             ))
 
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        final_data = [r for r in results if r is not None]
+
+        return final_data, self.steps_urls
 
     async def close(self):
+        """Closes the HTTP client."""
         await self.http_session.aclose()

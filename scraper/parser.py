@@ -94,7 +94,7 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
     steps_metadata.sort(key=lambda x: x["timestamp"])
     return steps_metadata
 
-def parse_step_detail(html: str, timestamp: datetime) -> SubmissionStep:
+def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionStep:
     """
     Parses a specific 'reviewquestion.php' page (a single step).
     """
@@ -175,6 +175,7 @@ def parse_step_detail(html: str, timestamp: datetime) -> SubmissionStep:
 
     return SubmissionStep(
         timestamp=timestamp,
+        url=url,
         score=score,
         test_results=test_results
     )

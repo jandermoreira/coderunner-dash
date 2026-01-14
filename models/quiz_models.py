@@ -65,6 +65,7 @@ class TestCase:
 class SubmissionStep:
     """A single student attempt at a specific timestamp."""
     timestamp: datetime
+    url: str
     score: float
     test_results: List[TestCase] = field(default_factory=list)
 
