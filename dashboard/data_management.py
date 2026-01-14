@@ -6,17 +6,17 @@ Handles cache persistence and asynchronous sync orchestration.
 
 import asyncio
 import os
-import pickle
+import dill
 import streamlit as st
 from scraper.moodle_scraper import MoodleScraper
-import models.quiz_models
+from models.quiz_models import *
 
 def has_local_cache(quiz_id):
     cache_path = f"quiz_{quiz_id}_cache.pkl"
     return os.path.exists(cache_path)
 
 def reset_local_cache(quiz_id):
-    """Removes the local pickle cache."""
+    """Removes the local dill cache."""
     cache_path = f"quiz_{quiz_id}_cache.pkl"
     if os.path.exists(cache_path):
         os.remove(cache_path)
@@ -28,14 +28,14 @@ def load_local_cache(quiz_id):
     cache_path = f"quiz_{quiz_id}_cache.pkl"
     if os.path.exists(cache_path):
         with open(cache_path, "rb") as f:
-            cache = pickle.load(f)
+            cache = dill.load(f)
             if isinstance(cache, dict) and "data" in cache:
                 st.session_state.raw_data = cache["data"]
                 st.session_state.steps_urls = cache.get("steps_urls", set())
             else:
                 st.session_state.raw_data = cache
                 st.session_state.steps_urls = set()
-            st.session_state.last_sync = "Loaded from Cache"
+            st.session_state.last_sync = "From cache"
         st.success("Data successfully loaded from local cache.")
     else:
         st.error("Cache file not found.")
@@ -54,7 +54,7 @@ def sync_with_moodle(user, password, quiz_id):
                 "steps_urls": updated_steps_urls
             }
             with open(f"quiz_{quiz_id}_cache.pkl", "wb") as f:
-                pickle.dump(cache_to_save, f)
+                dill.dump(cache_to_save, f)
             st.rerun()
         else:
             status.update(label="Sync failed or no data found.", state="error")

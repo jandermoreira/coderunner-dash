@@ -1,9 +1,9 @@
-import pickle
+import dill
 from models.quiz_models import UserQuizData, QuestionData, TestCase
 
 def save_data(data, filename="quiz_cache.pkl"):
     with open(filename, "wb") as f:
-        pickle.dump(data, f)
+        dill.dump(data, f)
 
 # Mock data to test different behaviors, including Tinkering
 mock_data = [
