@@ -79,28 +79,27 @@ def render_sidebar():
     return user, pw, qid
 
 
-# Mapeamento de estilos por tipo de intervenção
 INTERVENTION_STYLES = {
     InterventionType.INTERVENE_NOW: {
-        "color": "#FF4B4B",  # Vermelho
+        "color": "#FF4B4B",
         "icon": "🚨",
         "title": "Need intervention",
-        "bg_opacity": "15"  # Hex para ~8% opacidade
+        "bg_opacity": "40"
     },
     InterventionType.MONITOR: {
-        "color": "#FFAA00",  # Amarelo/Laranja
+        "color": "#FFAA00",
         "icon": "⚠️",
         "title": "Under Observation",
         "bg_opacity": "40"
     },
     InterventionType.TECHNICAL: {
-        "color": "#007BFF",  # Azul
+        "color": "#007BFF",
         "icon": "🔧",
         "title": "Technical Issues",
         "bg_opacity": "40"
     },
     InterventionType.NONE: {
-        "color": "#28A745",  # Verde
+        "color": "#28A745",
         "icon": "✅",
         "title": "Consistent Progress",
         "bg_opacity": "40"
