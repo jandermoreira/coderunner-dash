@@ -5,12 +5,15 @@ UI Module
 This module implements the dashboard user interface for the CodeRunner Monitoring System.
 It provides instructors with real-time insights into student submission patterns.
 """
+from pprint import pprint
+
 from analytics.metrics import calculate_analytics
 from dashboard.data_management import *
 from analytics.pipeline import run_pedagogical_pipeline
 from models.quiz_models import InterventionType
 from streamlit_extras.stylable_container import stylable_container
 from streamlit_autorefresh import st_autorefresh
+
 
 def format_timedelta(td):
     """Formats timedelta into readable strings."""
@@ -112,11 +115,11 @@ def render_intervention_section(enriched_data, intervention_type, title, st_meth
     Generic renderer for different types of pedagogical interventions.
     """
     st.markdown(f"##### {title}")
-    number_columns = 3
+    number_columns = 5
     cols = st.columns(number_columns)
     count = 0
 
-    for student in enriched_data:
+    for student in sorted(enriched_data, key=lambda u: u.username.lower()):
         for question in student.questions:
             # Filtra pelo tipo de intervenção passado no parâmetro
             if question.decision.intervention == intervention_type:
@@ -163,6 +166,16 @@ def render_intervene_alerts(enriched_data):
 
 def run_dashboard():
     """Main dashboard entry point."""
+    st.set_page_config(
+        page_title="Coderunner dashboard",
+        menu_items={
+            'Get help': 'https://exemplo.com/ajuda',
+            'Report a bug': 'https://exemplo.com/bug',
+            'About': "# Sobre meu app\nAlgum texto aqui."
+        },
+        layout="wide"
+    )
+
     # Ensure session state initialization
     if 'raw_data' not in st.session_state:
         st.session_state.raw_data = None
@@ -192,16 +205,16 @@ def run_dashboard():
                 "empty_message": "No critical logical interventions detected."
             },
             {
-                "type": InterventionType.MONITOR,
-                "title": "⚠️ Students to Monitor",
-                "st_element": st.warning,
-                "empty_message": "No one currently require monitoring."
-            },
-            {
                 "type": InterventionType.TECHNICAL,
                 "title": "🔧 Technical Issues",
                 "st_element": st.info,
                 "empty_message": "No techical issues"
+            },
+            {
+                "type": InterventionType.MONITOR,
+                "title": "⚠️ Students to Monitor",
+                "st_element": st.warning,
+                "empty_message": "No one currently require monitoring."
             },
             {
                 "type": InterventionType.NONE,
@@ -219,10 +232,10 @@ def run_dashboard():
                 item["empty_message"]
             )
 
-        st.divider()
-        st.subheader("Class Progress")
-        matrix_df = stats_df.set_index("Student").filter(like="(%)")
-        st.dataframe(matrix_df.style.background_gradient(cmap="RdYlGn"), width='stretch')
+        # st.divider()
+        # st.subheader("Class Progress")
+        # matrix_df = stats_df.set_index("Student").filter(like="(%)")
+        # st.dataframe(matrix_df.style.background_gradient(cmap="RdYlGn"), width='stretch')
 
     else:
         st.info("Awaiting data. Please check credentials and Sync.")
