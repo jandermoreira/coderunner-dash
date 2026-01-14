@@ -50,6 +50,8 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
     decision = PedagogicalDecision()
 
     if not steps:
+        decision.intervention = InterventionType.MONITOR
+        decision.justification = "⚠️ No submissions yet."
         return decision
 
     # --- LAYER 1: Technical Sanitation ---
@@ -58,7 +60,7 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
     )
     noise_ratio = compilation_errors / len(steps)
 
-    if noise_ratio > 0.6 and len(steps) > 3:
+    if noise_ratio > 0.6 and len(steps) > 5:
         decision.is_technical_noise = True
         decision.intervention = InterventionType.TECHNICAL
         decision.justification = "High technical noise: frequent compilation errors (syntax struggle)."
@@ -82,10 +84,8 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
     if len(steps) >= 3 and len(set(recent_scores)) == 1 and current_score < 100:
         decision.progress = ProgressState.PLATEAU
 
-    elif (
-            current_score > 0 and
-            all(recent_scores[i] <= recent_scores[i + 1] for i in range(len(recent_scores) - 1))
-    ):
+    elif (current_score > 0 and \
+          all(recent_scores[i] <= recent_scores[i + 1] for i in range(len(recent_scores) - 1))):
         decision.progress = ProgressState.CONSISTENT
 
     else:
@@ -128,6 +128,6 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
 
     else:
         decision.intervention = InterventionType.NONE
-        decision.justification = "✅ Student is progressing normally or has completed the task."
+        decision.justification = "✅ Normal progress."
 
     return decision
