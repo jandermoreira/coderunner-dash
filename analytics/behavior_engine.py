@@ -116,18 +116,18 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
 
     if decision.progress == ProgressState.PLATEAU:
         decision.intervention = InterventionType.INTERVENE_NOW
-        decision.justification = "Stuck in a plateau. Conceptual barrier detected."
+        decision.justification = "⛔ Stuck in a plateau. Conceptual barrier detected."
 
     elif decision.strategy == StrategyProfile.TRIAL_AND_ERROR:
         decision.intervention = InterventionType.INTERVENE_NOW
-        decision.justification = "Impulsive 'Tinkering' pattern. Explain the logic before coding."
+        decision.justification = "⚡ Impulsive 'tinkering' pattern. Explain the logic before coding."
 
     elif decision.progress == ProgressState.UNSTABLE:
         decision.intervention = InterventionType.MONITOR
-        decision.justification = "Score is fluctuating significantly. Monitor the next attempts."
+        decision.justification = "🔄 Score is fluctuating significantly. Monitor the next attempts."
 
     else:
         decision.intervention = InterventionType.NONE
-        decision.justification = "Student is progressing normally or has completed the task."
+        decision.justification = "✅ Student is progressing normally or has completed the task."
 
     return decision
