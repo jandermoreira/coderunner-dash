@@ -5,7 +5,6 @@ UI Module
 This module implements the dashboard user interface for the CodeRunner Monitoring System.
 It provides instructors with real-time insights into student submission patterns.
 """
-from pprint import pprint
 
 from analytics.metrics import calculate_analytics
 from dashboard.data_management import *
