@@ -79,6 +79,33 @@ def render_sidebar():
             st.session_state.sync_requested = True
             st.rerun()
 
+        st.divider()
+        st.subheader("Data Management")
+
+        if not has_local_cache(qid):
+            st.text("No local cache.")
+        else:
+            col_load, col_reset = st.columns(2)
+
+            with col_load:
+                if st.button("📂 Load Cache", use_container_width=True):
+                    load_local_cache(qid)
+
+            with col_reset:
+                if has_local_cache(qid):
+                    if st.button("🗑️ Reset"):
+                        st.session_state.confirm_reset = True
+                    if st.session_state.get('confirm_reset'):
+                        st.warning("Are you sure?")
+                        col_yes, col_no = st.columns(2)
+                        if col_yes.button("YES", width="stretch"):
+                            reset_local_cache(qid)
+                            st.session_state.confirm_reset = False
+                            st.rerun()
+                        if col_no.button("No", width="stretch"):
+                            st.session_state.confirm_reset = False
+                            st.rerun()
+
     return user, pw, qid
 
 
