@@ -146,35 +146,41 @@ def render_intervention_section(enriched_data, intervention_type, title, st_meth
     """
     Generic renderer for different types of pedagogical interventions.
     """
-    st.markdown(f"##### {title}")
-    number_columns = 5
-    cols = st.columns(number_columns)
-    count = 0
+    # st.markdown(f"##### {title}")
 
+    count = 0
+    number_columns = 5
+    style = INTERVENTION_STYLES.get(intervention_type)
+
+    cols = st.columns(number_columns)
     for student in sorted(enriched_data, key=lambda u: u.username.lower()):
-        for question in student.questions:
-            # Filtra pelo tipo de intervenção passado no parâmetro
-            if question.decision.intervention == intervention_type:
-                with cols[count % number_columns]:
-                    style = INTERVENTION_STYLES.get(intervention_type)
-                    with stylable_container(
-                            key=f"container_{intervention_type}_{student.username}_{count}",
-                            css_styles=f"""
-                                {{
-                                    border: 2px solid {style['color']};
-                                    border-radius: 8px;
-                                    padding: 15px;
-                                    background-color: {style['color']}{style['bg_opacity']};
-                                    margin-bottom: 10px;
-                                }}
-                            """,
-                    ):
-                        st.markdown(f"**{student.username}**")
-                        st.text(question.decision.justification)
+        questions_in_type = [(idx, question) for idx, question in enumerate(student.questions)
+                             if question.decision.intervention == intervention_type]
+        if questions_in_type:
+            if count % number_columns == 0:
+                cols = st.columns(number_columns)
+            with cols[count % number_columns]:
+                with stylable_container(
+                        key=f"container_{intervention_type}_{student.username}_{count}",
+                        css_styles=f"""
+                            {{
+                                border: 2px solid {style['color']};
+                                border-radius: 8px;
+                                padding: 10px;
+                                background-color: {style['color']}{style['bg_opacity']};
+                                margin-bottom: 10px;
+                            }}
+                        """,
+                ):
+                    st.markdown(f"**{student.username}**")
+                    for idx, question in questions_in_type:
+                        st.markdown(f"**{idx + 1}**: {question.decision.justification}")
+                    if student.quiz_end_timestamp:
+                        render_box(f"🏁 Finalizada em {student.quiz_end_timestamp}")
                 count += 1
 
-    if count == 0 and empty_msg:
-        st.write(empty_msg)
+    # if count == 0 and empty_msg:
+    #     st.write(empty_msg)
 
     return count
 
