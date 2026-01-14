@@ -109,6 +109,39 @@ INTERVENTION_STYLES = {
     }
 }
 
+st.markdown("""
+    <style>
+    [data-testid="column"] {
+        height: 200vh;
+    }
+    .full {
+        height: 100%;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+box_count = 0
+
+
+def render_box(markdown):
+    """Renders a box with a text"""
+    global box_count
+    with stylable_container(
+            key=f"box_{box_count}",
+            css_styles="""
+                {
+                    # border: 2px solid #467646;
+                    border-radius: 8px;
+                    padding: 10px;
+                    background-color: #46764666;
+                    margin-bottom: 10px;
+                }
+            """,
+    ):
+        st.markdown(markdown)
+        st.text("")
+    box_count += 1
+
 
 def render_intervention_section(enriched_data, intervention_type, title, st_method, empty_msg=None):
     """
