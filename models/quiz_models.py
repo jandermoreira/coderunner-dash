@@ -88,7 +88,6 @@ class QuestionData:
     avg_interval: float = 0.0
 
     # Resolved Pedagogical State (Layers 3 & 4)
-    # The UI will prioritize this object
     decision: PedagogicalDecision = field(default_factory=PedagogicalDecision)
 
 
