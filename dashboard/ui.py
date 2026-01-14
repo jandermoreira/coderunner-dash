@@ -238,25 +238,25 @@ def run_dashboard():
         intervention_items = [
             {
                 "type": InterventionType.INTERVENE_NOW,
-                "title": "🚨 Priority Interventions",
+                "title": "🚨 Interventions",
                 "st_element": st.error,
                 "empty_message": "No critical logical interventions detected."
             },
             {
                 "type": InterventionType.TECHNICAL,
-                "title": "🔧 Technical Issues",
+                "title": "🔧 Technical issues",
                 "st_element": st.info,
-                "empty_message": "No techical issues"
+                "empty_message": "No technical issues"
             },
             {
                 "type": InterventionType.MONITOR,
-                "title": "⚠️ Students to Monitor",
+                "title": "⚠️ Under monitoring",
                 "st_element": st.warning,
                 "empty_message": "No one currently require monitoring."
             },
             {
                 "type": InterventionType.NONE,
-                "title": "✅ Consistent Progress",
+                "title": "✅ Consistent progress",
                 "st_element": st.success,
                 "empty_message": "No one is in consistent progress!"
             }
