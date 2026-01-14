@@ -42,33 +42,6 @@ def render_sidebar():
         qid = st.text_input("Quiz ID", value=os.getenv("MOODLE_QUIZ_ID", ""))
 
         st.divider()
-        st.subheader("Data Management")
-
-        col_load, col_reset = st.columns(2)
-
-        with col_load:
-            if st.button("📂 Load Cache", use_container_width=True):
-                load_local_cache(qid)
-
-        with col_reset:
-            if st.button("🗑️ Reset"):
-                st.session_state.confirm_reset = True
-            if st.session_state.get('confirm_reset'):
-                st.warning("Are you sure?")
-                col_yes, col_no = st.columns(2)
-                if col_yes.button("YES", width="stretch"):
-                    status, message = reset_local_cache(qid)
-                    if status:
-                        st.info(message)
-                    else:
-                        st.error(message)
-                    st.session_state.confirm_reset = False
-                    # st.rerun()
-                if col_no.button("No", width="stretch"):
-                    st.session_state.confirm_reset = False
-                    st.rerun()
-
-        st.divider()
         st.subheader("Updates")
         enable_auto = st.checkbox("Enable Auto-sync", value=True)
         if enable_auto:
