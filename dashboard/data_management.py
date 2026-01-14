@@ -11,13 +11,17 @@ import streamlit as st
 from scraper.moodle_scraper import MoodleScraper
 import models.quiz_models
 
+def has_local_cache(quiz_id):
+    cache_path = f"quiz_{quiz_id}_cache.pkl"
+    return os.path.exists(cache_path)
+
 def reset_local_cache(quiz_id):
     """Removes the local pickle cache."""
     cache_path = f"quiz_{quiz_id}_cache.pkl"
     if os.path.exists(cache_path):
         os.remove(cache_path)
-        return True, f"Cache for Quiz {quiz_id} removed."
-    return False, "No cache file found."
+        return f"Cache for Quiz {quiz_id} removed."
+    return "No cache file found."
 
 def load_local_cache(quiz_id):
     """Loads student data and URL history from local storage."""
