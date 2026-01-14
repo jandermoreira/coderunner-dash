@@ -85,7 +85,7 @@ class QuestionData:
     # Derived Technical Metrics (Layer 2)
     plateau_duration_steps: int = 0
     test_stability_ratio: float = 1.0
-    avg_interval_seconds: float = 0.0
+    avg_interval: float = 0.0
 
     # Resolved Pedagogical State (Layers 3 & 4)
     # The UI will prioritize this object
