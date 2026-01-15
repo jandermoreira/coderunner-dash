@@ -61,6 +61,8 @@ class MoodleScraper:
                 student_row = ui_status.empty()
                 student_row.write(f"🔄 Searching for {student_name}")
 
+            print(f"DEBUG full history: {student_name} at {review_url}")
+
             response = await self.http_session.get(review_url)
             current_page_data = parse_student_page(response.text, student_name)
 
@@ -133,6 +135,7 @@ class MoodleScraper:
                   existing_data: List[UserQuizData] = None
                   ) -> Tuple[List[UserQuizData], Set[str]]:
         """Orchestrates the incremental scraping process for all students."""
+        print("DEBUG scraper run")
         if not await self.login():
             return []
 
@@ -168,6 +171,7 @@ class MoodleScraper:
 
         results = await asyncio.gather(*tasks)
         final_data = [r for r in results if r is not None]
+        print(f"DEBUG scraper finished ({len(final_data)} students)")
 
         return final_data, self.steps_urls
 

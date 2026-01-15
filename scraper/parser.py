@@ -200,6 +200,7 @@ def parse_student_page(html: str, username: str) -> UserQuizData:
                     user_data.quiz_start_timestamp = parse_moodle_datetime(val)
                 if "conclu" in text or "finished" in text:
                     user_data.quiz_end_timestamp = parse_moodle_datetime(val)
+    print(f"DEBUG parse: {username} started {user_data.quiz_start_timestamp}")
 
     # 2. Identify Questions
     # Captures all questions visible on the main page

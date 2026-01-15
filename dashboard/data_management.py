@@ -30,15 +30,11 @@ def load_local_cache(quiz_id):
         with open(cache_path, "rb") as f:
             cache = dill.load(f)
             if isinstance(cache, dict) and "data" in cache:
-                st.session_state.raw_data = cache["data"]
-                st.session_state.steps_urls = cache.get("steps_urls", set())
+                return cache["data"], cache.get("steps_urls", set())
             else:
-                st.session_state.raw_data = cache
-                st.session_state.steps_urls = set()
-            st.session_state.last_sync = "From cache"
-        st.success("Data successfully loaded from local cache.")
+                return cache, set()
     else:
-        st.error("Cache file not found.")
+        return None
 
 def sync_with_moodle(user, password, quiz_id):
     """Triggers the incremental sync process."""
@@ -55,7 +51,6 @@ def sync_with_moodle(user, password, quiz_id):
             }
             with open(f"quiz_{quiz_id}_cache.pkl", "wb") as f:
                 dill.dump(cache_to_save, f)
-            st.rerun()
         else:
             status.update(label="Sync failed or no data found.", state="error")
 

@@ -29,6 +29,7 @@ def format_timedelta(td):
     else:
         return f"+{seconds}s"
 
+
 def render_top_indicators(data):
     indicators = {
         "Students": len(data),
@@ -43,17 +44,17 @@ def render_top_indicators(data):
         ]) > 0) for student in data
     ])
     if intervene_now > 0:
-        indicators[f"Intervene  ({intervene_now/len(data) * 100:.1f}%)"] = f"🚨 {intervene_now}"
+        indicators[f"Intervene  ({intervene_now / len(data) * 100:.1f}%)"] = f"🚨 {intervene_now}"
 
     technical = sum([
-            int(len([
-                question.decision.intervention
-                for question in student.questions
-                if question.decision.intervention == InterventionType.TECHNICAL
-            ]) > 0) for student in data
-        ])
+        int(len([
+            question.decision.intervention
+            for question in student.questions
+            if question.decision.intervention == InterventionType.TECHNICAL
+        ]) > 0) for student in data
+    ])
     if technical > 0:
-        indicators[f"Technical  ({technical/len(data) * 100:.1f}%)"] = f"🔧 {technical}"
+        indicators[f"Technical  ({technical / len(data) * 100:.1f}%)"] = f"🔧 {technical}"
 
     cols = st.columns(len(indicators))
     for idx, (title, value) in enumerate(indicators.items()):
@@ -67,48 +68,55 @@ def render_sidebar():
     """
     with st.sidebar:
         st.title("📊 CodeRunner Monitor")
-        st.header("Settings")
+        # st.header("Settings")
         user = st.text_input("Moodle User", value=os.getenv("MOODLE_USER", ""))
         pw = st.text_input("Password", type="password", value=os.getenv("MOODLE_PASS", ""))
         qid = st.text_input("Quiz ID", value=os.getenv("MOODLE_QUIZ_ID", ""))
+        if has_local_cache(qid):
+            if st.button("📂 Load cache", use_container_width=True):
+                loaded_cache = load_local_cache(qid)
+                if loaded_cache:
+                    loaded_data, loaded_steps_urls = loaded_cache
+                    st.session_state.raw_data = loaded_data
+                    st.session_state.steps_urls = loaded_steps_urls
+                    st.session_state.last_sync = "From cache"
+                    st.info("Cache loaded.")
+                else:
+                    st.error("Cache file not found.")
+
+            if has_local_cache(qid):
+                if st.button("🗑️ Delete cache", use_container_width=True):
+                    st.session_state.confirm_deletion = True
+                if st.session_state.get('confirm_deletion'):
+                    st.warning("Are you sure?")
+                    col_yes, col_no = st.columns(2)
+                    if col_yes.button("YES", width="stretch"):
+                        reset_local_cache(qid)
+                        st.session_state.confirm_deletion = False
+                        st.session_state.raw_data = None
+                        st.session_state.steps_urls = set()
+                        st.rerun()
+                    if col_no.button("No", width="stretch"):
+                        st.session_state.confirm_deletion = False
+                        st.rerun()
 
         st.divider()
-        st.subheader("Updates")
+        # st.subheader("Updates")
         enable_auto = st.checkbox("Enable Auto-sync", value=True)
+        st.session_state.enable_auto_sync = enable_auto
         if enable_auto:
             sync_interval = st.slider("Sync interval (min)", min_value=1, max_value=10, value=5)
-            st_autorefresh(interval=sync_interval * 60 * 1000, key="moodle_sync_timer")
+            st.session_state.sync_interval = sync_interval
+
+            refresh_count = st_autorefresh(
+                interval=sync_interval * 60 * 1000,
+                key="moodle_sync_timer"
+            )
+            st.session_state.refresh_count = refresh_count
 
         if st.button("🚀 Sync Now", width='stretch', type="primary"):
             st.session_state.sync_requested = True
             st.rerun()
-
-        st.divider()
-        st.subheader("Data Management")
-
-        if not has_local_cache(qid):
-            st.text("No local cache.")
-        else:
-            col_load, col_reset = st.columns(2)
-
-            with col_load:
-                if st.button("📂 Load Cache", use_container_width=True):
-                    load_local_cache(qid)
-
-            with col_reset:
-                if has_local_cache(qid):
-                    if st.button("🗑️ Reset"):
-                        st.session_state.confirm_reset = True
-                    if st.session_state.get('confirm_reset'):
-                        st.warning("Are you sure?")
-                        col_yes, col_no = st.columns(2)
-                        if col_yes.button("YES", width="stretch"):
-                            reset_local_cache(qid)
-                            st.session_state.confirm_reset = False
-                            st.rerun()
-                        if col_no.button("No", width="stretch"):
-                            st.session_state.confirm_reset = False
-                            st.rerun()
 
         if st.button("rerun()"):
             st.rerun()
@@ -242,23 +250,43 @@ def run_dashboard():
     """Main dashboard entry point."""
     st.set_page_config(
         page_title="Coderunner dashboard",
-        menu_items={
-            'Get help': 'https://exemplo.com/ajuda',
-            'Report a bug': 'https://exemplo.com/bug',
-            'About': "# Sobre meu app\nAlgum texto aqui."
-        },
         layout="wide"
     )
 
     # Ensure session state initialization
     if 'raw_data' not in st.session_state:
         st.session_state.raw_data = None
+    if 'steps_urls' not in st.session_state:
+        st.session_state.steps_urls = set()
     if 'last_sync' not in st.session_state:
         st.session_state.last_sync = "N/A"
     if 'sync_requested' not in st.session_state:
         st.session_state.sync_requested = False
+    if 'refresh_count' not in st.session_state:
+        st.session_state.refresh_count = 0
+    if 'last_refresh_count' not in st.session_state:
+        st.session_state.last_refresh_count = 0
+    if 'enable_auto_sync' not in st.session_state:
+        st.session_state.enable_auto_sync = True
+    if 'sync_interval' not in st.session_state:
+        st.session_state.sync_interval = None
+    if 'last_sync_interval' not in st.session_state:
+        st.session_state.last_sync_interval = None
 
     username, password, quiz_id = render_sidebar()
+
+    # Auto-sync on refresh
+    print('refresh', st.session_state.refresh_count)
+    if st.session_state.enable_auto_sync:
+        interval_changed = st.session_state.sync_interval != st.session_state.last_sync_interval
+        st.session_state.last_sync_interval = st.session_state.sync_interval
+
+        if (not interval_changed
+                and st.session_state.refresh_count != st.session_state.last_refresh_count):
+            st.session_state.last_refresh_count = st.session_state.refresh_count
+            sync_with_moodle(username, password, quiz_id)
+            st.session_state.last_sync = datetime.now().strftime("%d/%m/%Y %H:%M")
+            st.rerun()
 
     if st.session_state.get('sync_requested'):
         st.session_state.sync_requested = False
