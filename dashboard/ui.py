@@ -29,10 +29,6 @@ def format_timedelta(td):
     else:
         return f"+{seconds}s"
 
-
-from pprint import pprint
-
-
 def render_top_indicators(data):
     indicators = {
         "Students": len(data),
@@ -47,7 +43,7 @@ def render_top_indicators(data):
         ]) > 0) for student in data
     ])
     if intervene_now > 0:
-        indicators["Invervene"] = f"🚨 {intervene_now}"
+        indicators[f"Intervene  ({intervene_now/len(data) * 100:.1f}%)"] = f"🚨 {intervene_now}"
 
     technical = sum([
             int(len([
@@ -57,7 +53,7 @@ def render_top_indicators(data):
             ]) > 0) for student in data
         ])
     if technical > 0:
-        indicators["Technical"] = f"🔧 {technical}"
+        indicators[f"Technical  ({technical/len(data) * 100:.1f}%)"] = f"🔧 {technical}"
 
     cols = st.columns(len(indicators))
     for idx, (title, value) in enumerate(indicators.items()):
@@ -193,6 +189,7 @@ def render_intervention_section(enriched_data, intervention_type, title, st_meth
 
     cols = st.columns(number_columns)
     for student in sorted(enriched_data, key=lambda u: u.username.lower()):
+        # total_questions = len(student.questions)
         questions_in_type = [(idx, question) for idx, question in enumerate(student.questions)
                              if question.decision.intervention == intervention_type]
         if questions_in_type:
