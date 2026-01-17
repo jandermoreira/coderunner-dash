@@ -2,9 +2,7 @@ beautifulsoup4
 dill
 httpx
 pandas
-plotly
 pytest
-pytest-mock
 streamlit
 streamlit-autorefresh
 streamlit-extras
