@@ -101,92 +101,93 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
 
 
 def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionStep:
-    """
-    Parses a specific 'reviewquestion.php' page (a single step).
-    """
     soup = BeautifulSoup(html, "html.parser")
+    q_div = soup.select_one("div.que.coderunner")
 
-    # Focus on question wrapper if possible
-    q_div = soup.select_one("div.que.coderunner") or soup
+    # if not q_div:
+    #     return SubmissionStep(timestamp=timestamp, url=url, score=0.0)
 
-    # 1. Score Extraction
+    # 1. SCORE
     score = 0.0
-    grading = q_div.select_one("div.gradingdetails")
-    if grading:
-        try:
-            text = grading.get_text(strip=True)
-            # Regex to catch: "Mark 1.00 out of", "Nota 1,00 de", "Atingiu 0.50 de"
-            match = re.search(r'([\d.,]+)\s*(?:/|de|out of|de um)', text)
-            if match:
-                score_str = match.group(1).replace(',', '.')
-                score = float(score_str)
-        except Exception:
-            pass
+    grading_div = q_div.select_one(".gradingdetails")
+    if grading_div:
+        match = re.search(r'([\d.,]+)\s*(?:/|de|out of)', grading_div.get_text())
+        if match:
+            score = float(match.group(1).replace(',', '.'))
 
-    # 2. Test Cases Extraction
     test_results = []
 
-    # Strategy: Find table by specific class, OR search for table with expected headers
-    test_table = q_div.select_one("table.coderunner-test-results")
+    # 2. ERRORS
+    error_containers = q_div.select(
+        ".coderunner-compilation-output, .cr-test-error, .coderunner-test-results.bad, .coderunner-stderr, pre.pre_syntax_error"
+    )
 
-    if not test_table:
-        # Fallback: Find any table with "Input" or "Teste" headers
-        for tbl in q_div.find_all("table"):
-            headers = [th.get_text(strip=True).lower() for th in tbl.find_all("th")]
-            if any(x in headers for x in ["input", "teste", "test", "esperado"]):
-                test_table = tbl
-                break
+    is_comp = False
+    is_run = False
 
-    if test_table and test_table.tbody:
-        for row in test_table.tbody.find_all("tr"):
-            # Ensure it's not a header row inside body
-            if not row.find("td"): continue
+    if error_containers:
+        for container in error_containers:
+            err_text = container.get_text().lower()
 
-            # --- Pass/Fail Detection ---
-            passed = False
-            # Find icon: search for <i> or <img> with specific classes
-            icon = row.select_one(".icon, .fa")
+            if ("syntaxerror" in err_text
+                    or "erro(s) de sintaxe" in err_text
+                    or "error:" in err_text
+                    or "compilation error" in err_text
+            ):
+                is_comp = True
 
-            if icon:
-                classes = " ".join(icon.get("class", [])).lower()
-                if "check" in classes or "pass" in classes:
-                    passed = True
+            if "traceback" in err_text or "runtime error" in err_text:
+                is_run = True
 
-            # --- Error Detection ---
-            is_runtime = False
-            is_compilation = False
+        if not is_comp and not is_run:
+            is_comp = True
 
-            if not passed:
-                row_text = row.get_text().lower()
-                if ("***run error***" in row_text
-                        or "exception" in row_text
-                        or "traceback" in row_text
-                        or ": error :" in row_text
-                        or "all warnings being treated as errors" in row_text):
-                    # print("DEBUG Compiler", )
-                    is_runtime = True
-                elif "syntaxerror" in row_text or "compilation error" in row_text:
-                    is_compilation = True
-
-            test_results.append(TestCase(
-                passed=passed,
-                is_runtime_error=is_runtime,
-                is_compilation_error=is_compilation
-            ))
-            # print(f"DEBUG Table PRESENT --> compilation error = {is_compilation}")
-
-    # 3. Global Error Handling (No table present)
-    elif q_div.select_one(".coderunner-test-results.failure") or \
-            q_div.select_one(".coderunner-compilation-output") or \
-            "syntaxerror" in q_div.get_text().lower():
-
+    if is_comp or is_run:
         test_results.append(TestCase(
             passed=False,
-            is_compilation_error=True
+            is_compilation_error=is_comp,
+            is_runtime_error=is_run
         ))
-        # print(f"DEBUG No table present --> compilation error!")
-    # else:
-        # print("DEBUG Something else here!")
+    else:
+        # 3. TABLE
+        table = q_div.select_one("table.coderunner-test-results")
+        if table:
+            rows = table.select("tbody tr")
+            for row in rows:
+                cells = row.find_all("td")
+                if not cells: continue
+
+                # Identifica sucesso pelo ícone (padrão Moove/Moodle)
+                is_passed = bool(row.select_one(".check, .fa-check, .text-success"))
+
+                # Se falhou, verifica se foi erro de runtime nesta linha específica
+                row_text = row.get_text().lower()
+                is_run = "traceback" in row_text or "runtime error" in row_text
+
+                test_results.append(TestCase(
+                    passed=is_passed,
+                    is_compilation_error=False,
+                    is_runtime_error=is_run
+                ))
+
+    # --- DETECTED DATA SUMMARY ---
+    passed_count = sum(1 for t in test_results if t.passed)
+    failed_count = len(test_results) - passed_count
+
+    # Check if any test case (or the synthetic error case) flagged a technical issue
+    comp_found = any(t.is_compilation_error for t in test_results)
+    runt_found = any(t.is_runtime_error for t in test_results)
+
+    print(f"\n" + "=" * 50)
+    print(f"DETECTION LOG for: {url.split('/')[-1]}")
+    print(f"Score extracted: {score}")
+    print(f"Test Cases found: {len(test_results)}")
+    print(f"  > Passed: {passed_count}")
+    print(f"  > Failed: {failed_count}")
+    print(f"Technical Flags:")
+    print(f"  > Compilation Error: {comp_found}")
+    print(f"  > Runtime Error:     {runt_found}")
+    print("=" * 50 + "\n")
 
     return SubmissionStep(
         timestamp=timestamp,
