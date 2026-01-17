@@ -1,7 +1,7 @@
 from scraper.parser import parse_step_detail
 from datetime import datetime
 
-files = ["exemplo-tentativa4.html", "exemplo-com-erro-sintaxe.html"]
+files = ["somente-erro-saida.html"]
 
 for f_name in files:
     with open('samples/' +f_name, 'r', encoding='utf-8') as f:
@@ -14,6 +14,10 @@ for f_name in files:
     print(f"Total de Testes: {len(step.test_results)}")
 
     # Verifica se algum teste foi marcado como erro
+    for t in step.test_results:
+        print("Comp", t.is_compilation_error)
+        print("Exec", t.is_runtime_error)
+
     comp_err = any(t.is_compilation_error for t in step.test_results)
     runt_err = any(t.is_runtime_error for t in step.test_results)
 
