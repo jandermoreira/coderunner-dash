@@ -64,17 +64,29 @@ def reconstruct_objects(raw_list):
             # 2. Reconstruct Steps
             steps = []
             for s_data in q_data.get('steps', []):
-                # TestCases are simple dataclasses without Enums/dates usually
-                tests = [TestCase(**t_data) for t_data in s_data.get('test_results', [])]
+                # Reconstruct TestCases
+                # We do this explicitly to avoid TypeErrors if the cache contains
+                # old keys (like 'is_compilation_error') that no longer exist in the model.
+                tests = []
+                for t_data in s_data.get('test_results', []):
+                    tests.append(TestCase(
+                        passed=t_data.get('passed', False),
+                        is_runtime_error=t_data.get('is_runtime_error', False)
+                    ))
 
                 # Handle Timestamp (String -> Datetime)
                 ts = s_data.get('timestamp')
                 dt = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
 
+                # Create SubmissionStep with NEW fields
+                # We use .get(..., False) to ensure backward compatibility
+                # if loading a cache created before these fields existed.
                 steps.append(SubmissionStep(
                     timestamp=dt,
                     url=s_data.get('url'),
                     score=s_data.get('score'),
+                    has_compilation_error=s_data.get('has_compilation_error', False),
+                    has_runtime_error=s_data.get('has_runtime_error', False),
                     test_results=tests
                 ))
 

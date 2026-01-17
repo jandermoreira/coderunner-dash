@@ -31,6 +31,7 @@ def count_regressions_with_forgiveness(test_history: List[bool]) -> int:
             regressions += 1
     return regressions
 
+
 def calculate_analytics(current_results: List[UserQuizData]):
     """
     Main entry point for UI data generation.
@@ -68,10 +69,8 @@ def calculate_analytics(current_results: List[UserQuizData]):
             entry[f"{q_label} Regressions"] = total_q_regressions
 
             # --- 2. Technical Noise ---
-            comp_errors = sum(
-                1 for s in question.steps
-                if any(t.is_compilation_error for t in s.test_results)
-            )
+            comp_errors = sum(1 for s in question.steps if s.has_compilation_error)
+
             entry[f"{q_label} Noise"] = round(comp_errors / len(question.steps), 2) if question.steps else 0
 
             # --- 3. Tinkering Detection ---

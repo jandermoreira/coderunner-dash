@@ -59,7 +59,7 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
     recent_steps = steps[-RECENT_WINDOW:]
     recent_compilation_errors = sum(
         1 for step in recent_steps
-        if any(test.is_compilation_error for test in step.test_results)
+        if step.has_compilation_error
     )
 
     if recent_compilation_errors >= 2:
@@ -87,49 +87,35 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
     # 3.1 Progress State
     if len(steps) >= 3 and len(set(recent_scores)) == 1 and current_score < 100:
         decision.progress = ProgressState.PLATEAU
-
-    elif (current_score > 0 and \
+    elif (current_score > 0 and
+          len(recent_scores) > 1 and
           all(recent_scores[i] <= recent_scores[i + 1] for i in range(len(recent_scores) - 1))):
         decision.progress = ProgressState.CONSISTENT
-
     else:
         decision.progress = ProgressState.UNSTABLE
 
-    # 3.2 Strategy Profiling (minutes-based)
-
-    # Planning: reflection ≥ 5 minutes before first submission with immediate success
+    # 3.2 Strategy Profiling
     if time_to_first >= 5 and steps[0].score > 0:
         decision.strategy = StrategyProfile.PLANNING
-
-    # Trial and Error: many attempts in the same minute window
     elif len(steps) > 5 and avg_interval < 1:
         decision.strategy = StrategyProfile.TRIAL_AND_ERROR
-
-    # Brute Force: very high number of attempts
     elif len(steps) > 8:
         decision.strategy = StrategyProfile.BRUTE_FORCE
-
-    # Refinement: few attempts to reach a positive score
     elif current_score > 0 and len(steps) < 4:
         decision.strategy = StrategyProfile.REFINEMENT
-
     else:
         decision.strategy = StrategyProfile.UNKNOWN
 
     # --- LAYER 4: Pedagogical Decision ---
-
     if decision.progress == ProgressState.PLATEAU:
         decision.intervention = InterventionType.INTERVENE_NOW
         decision.justification = "⛔ Stuck in a plateau. Conceptual barrier detected."
-
     elif decision.strategy == StrategyProfile.TRIAL_AND_ERROR:
         decision.intervention = InterventionType.INTERVENE_NOW
         decision.justification = "⚡ Impulsive 'tinkering' pattern. Explain the logic before coding."
-
     elif decision.progress == ProgressState.UNSTABLE:
         decision.intervention = InterventionType.MONITOR
         decision.justification = "🔄 Score is fluctuating significantly. Monitor the next attempts."
-
     else:
         decision.intervention = InterventionType.NONE
         decision.justification = "✅ Normal progress."

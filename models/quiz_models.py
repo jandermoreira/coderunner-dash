@@ -57,7 +57,6 @@ class PedagogicalDecision:
 class TestCase:
     """Result of a single test case within a CodeRunner question."""
     passed: bool
-    is_compilation_error: bool = False
     is_runtime_error: bool = False
 
 
@@ -67,6 +66,8 @@ class SubmissionStep:
     timestamp: datetime
     url: str
     score: float
+    has_compilation_error: bool
+    has_runtime_error: bool
     test_results: List[TestCase] = field(default_factory=list)
 
 

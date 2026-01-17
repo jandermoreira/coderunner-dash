@@ -101,13 +101,25 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
 
 
 def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionStep:
+    """
+    Parses the HTML of a specific submission step to extract score, errors,
+    and test case details.
+    """
     soup = BeautifulSoup(html, "html.parser")
     question_div = soup.select_one("div.que.coderunner")
 
+    # Handle cases where the question div is not found (defensive coding)
     if not question_div:
-        return SubmissionStep(timestamp=timestamp, url=url, score=0.0)
+        return SubmissionStep(
+            timestamp=timestamp,
+            url=url,
+            score=0.0,
+            has_compilation_error=False,
+            has_runtime_error=False,
+            test_results=[]
+        )
 
-    # 1. SCORE
+    # 1. EXTRACT SCORE
     score = 0.0
     grading_div = question_div.select_one(".gradingdetails")
     if grading_div:
@@ -117,13 +129,14 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
 
     test_results = []
 
-    # 2. ERRORS
+    # 2. DETECT GLOBAL ERRORS (Compilation or Global Runtime)
     error_containers = question_div.select(
-        ".coderunner-compilation-output, .cr-test-error, .coderunner-test-results.bad, .coderunner-stderr, pre.pre_syntax_error"
+        ".coderunner-compilation-output, .cr-test-error, "
+        ".coderunner-test-results.bad, .coderunner-stderr, pre.pre_syntax_error"
     )
 
-    is_comp = False
-    is_run = False
+    is_compilation_error = False
+    is_global_runtime_error = False
 
     if error_containers:
         for container in error_containers:
@@ -134,22 +147,23 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
                     or "error:" in err_text
                     or "compilation error" in err_text
             ):
-                is_comp = True
+                is_compilation_error = True
 
             if "traceback" in err_text or "runtime error" in err_text:
-                is_run = True
+                is_global_runtime_error = True
 
-        if not is_comp and not is_run:
-            is_comp = True
+        # Fallback: if containers exist but keywords weren't found, assume compilation error
+        if not is_compilation_error and not is_global_runtime_error:
+            is_compilation_error = True
 
-    if is_comp or is_run:
+    # If global errors exist, create a synthetic failed test case (optional, depending on UI needs)
+    if is_compilation_error or is_global_runtime_error:
         test_results.append(TestCase(
             passed=False,
-            is_compilation_error=is_comp,
-            is_runtime_error=is_run
+            is_runtime_error=is_global_runtime_error
         ))
     else:
-        # 3. TABLE
+        # 3. PARSE RESULTS TABLE
         table = question_div.select_one("table.coderunner-test-results")
         if table:
             rows = table.select("tbody tr")
@@ -157,42 +171,29 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
                 cells = row.find_all("td")
                 if not cells: continue
 
-                # Identifica sucesso pelo ícone (padrão Moove/Moodle)
+                # Identify success by icon/class
                 is_passed = bool(row.select_one(".check, .fa-check, .text-success"))
 
-                # Se falhou, verifica se foi erro de runtime nesta linha específica
+                # Check for runtime error in specific row output
                 row_text = row.get_text().lower()
-                is_run = "traceback" in row_text or "runtime error" in row_text
+                is_row_runtime_error = "traceback" in row_text or "runtime error" in row_text
 
                 test_results.append(TestCase(
                     passed=is_passed,
-                    is_compilation_error=False,
-                    is_runtime_error=is_run
+                    is_runtime_error=is_row_runtime_error
                 ))
 
-    # # --- DETECTED DATA SUMMARY ---
-    # passed_count = sum(1 for t in test_results if t.passed)
-    # failed_count = len(test_results) - passed_count
-    #
-    # # Check if any test case (or the synthetic error case) flagged a technical issue
-    # comp_found = any(t.is_compilation_error for t in test_results)
-    # runt_found = any(t.is_runtime_error for t in test_results)
-    #
-    # print(f"\n" + "=" * 50)
-    # print(f"DETECTION LOG for: {url.split('/')[-1]}")
-    # print(f"Score extracted: {score}")
-    # print(f"Test Cases found: {len(test_results)}")
-    # print(f"  > Passed: {passed_count}")
-    # print(f"  > Failed: {failed_count}")
-    # print(f"Technical Flags:")
-    # print(f"  > Compilation Error: {comp_found}")
-    # print(f"  > Runtime Error:     {runt_found}")
-    # print("=" * 50 + "\n")
+    # 4. AGGREGATE FLAGS FOR THE SUBMISSION STEP
+    # A step has a runtime error if a global one occurred OR if any specific test case failed with one
+    step_has_runtime_error = is_global_runtime_error or any(
+        t.is_runtime_error for t in test_results)
 
     return SubmissionStep(
         timestamp=timestamp,
         url=url,
         score=score,
+        has_compilation_error=is_compilation_error,
+        has_runtime_error=step_has_runtime_error,
         test_results=test_results
     )
 
