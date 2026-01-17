@@ -16,6 +16,7 @@ from models.quiz_models import (
     ProgressState, StrategyProfile, InterventionType, PedagogicalDecision
 )
 
+
 def reconstruct_objects(raw_list):
     """
     Converts a list of dictionaries back into UserQuizData objects.
@@ -49,7 +50,7 @@ def reconstruct_objects(raw_list):
 
             # Reconstruct Decision (Pedagogical State)
             decision_data = q_data.get('decision', {})
-            decision = PedagogicalDecision() # Default
+            decision = PedagogicalDecision()  # Default
             if decision_data:
                 # Handle Enums conversion safely
                 try:
@@ -57,11 +58,12 @@ def reconstruct_objects(raw_list):
                         is_technical_noise=decision_data.get('is_technical_noise', False),
                         progress=ProgressState(decision_data.get('progress', 'none')),
                         strategy=StrategyProfile(decision_data.get('strategy', 'unknown')),
-                        intervention=InterventionType(decision_data.get('intervention', 'do_not_intervene')),
+                        intervention=InterventionType(
+                            decision_data.get('intervention', 'do_not_intervene')),
                         justification=decision_data.get('justification', "")
                     )
                 except Exception:
-                    pass # Keep default if enum fails
+                    pass  # Keep default if enum fails
 
             # Create QuestionData
             q_copy = q_data.copy()
@@ -76,11 +78,13 @@ def reconstruct_objects(raw_list):
 
     return reconstructed
 
+
 # --- CACHE MANAGEMENT ---
 
 def has_local_cache(quiz_id):
     cache_path = f"quiz_{quiz_id}_cache.pkl"
     return os.path.exists(cache_path)
+
 
 def reset_local_cache(quiz_id):
     """Removes the local dill cache."""
@@ -89,6 +93,7 @@ def reset_local_cache(quiz_id):
         os.remove(cache_path)
         return f"Cache for Quiz {quiz_id} removed."
     return "No cache file found."
+
 
 def load_local_cache(quiz_id):
     """Loads student data and URL history from local storage."""
@@ -115,11 +120,13 @@ def load_local_cache(quiz_id):
     else:
         return None
 
+
 def sync_with_moodle(user, password, quiz_id):
     """Triggers the incremental sync process."""
     with st.status("Syncing with Moodle...", expanded=False) as status:
         try:
-            fetched_data, updated_steps_urls = asyncio.run(run_scraper_async(user, password, quiz_id, status))
+            fetched_data, updated_steps_urls = asyncio.run(
+                run_scraper_async(user, password, quiz_id, status))
 
             if isinstance(fetched_data, list):
                 st.session_state.raw_data = fetched_data
@@ -158,7 +165,6 @@ def sync_with_moodle(user, password, quiz_id):
 async def run_scraper_async(user, password, quiz_id, status_box):
     cached_steps = st.session_state.get("steps_urls", set())
     existing_data = st.session_state.get("raw_data", None)
-
 
     scraper = MoodleScraper(user, password, cached_steps)
     try:
