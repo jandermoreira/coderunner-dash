@@ -56,7 +56,7 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
 
     # --- LAYER 1: Technical Sanitation ---
     compilation_errors = sum(
-        1 for s in steps if any(t.is_compilation_error for t in s.test_results)
+        1 for step in steps if any(test.is_compilation_error for test in step.test_results)
     )
     noise_ratio = compilation_errors / len(steps)
 

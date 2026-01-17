@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup
 from typing import List, Optional, Set, Tuple
 from models.quiz_models import UserQuizData
 
+from pprint import pprint
+
 from scraper.parser import (
     parse_student_page,
     extract_available_steps,
@@ -52,16 +54,16 @@ class MoodleScraper:
             st.error(f"Authentication Error: {error}")
             return False
 
-    async def fetch_student_full_history(self, student_name: str, review_url: str,
-                                         ui_status, existing_user_data: Optional[
-                UserQuizData] = None) -> UserQuizData:
+    async def fetch_student_full_history(
+            self, student_name: str, review_url: str,
+            ui_status, existing_user_data: Optional[UserQuizData] = None
+    ) -> UserQuizData:
         """Extracts history and merges with existing data to enable incremental updates."""
         try:
+            # print(f"DEBUG Fetching: {student_name} at {review_url}")  ### REMOVE LINE
             if ui_status:
                 student_row = ui_status.empty()
                 student_row.write(f"🔄 Searching for {student_name}")
-
-            print(f"DEBUG full history: {student_name} at {review_url}")
 
             response = await self.http_session.get(review_url)
             current_page_data = parse_student_page(response.text, student_name)
@@ -83,10 +85,10 @@ class MoodleScraper:
                     if hasattr(step, "url") and step.url:
                         existing_steps_map[step.url] = step
 
-            # No moodle_scraper.py, logo após montar o existing_steps_map:
-            if existing_steps_map:
-                primeira_url = list(existing_steps_map.keys())[0]
-                obj_exemplo = existing_steps_map[primeira_url]
+            # # No moodle_scraper.py, logo após montar o existing_steps_map:
+            # if existing_steps_map:
+            #     primeira_url = list(existing_steps_map.keys())[0]
+            #     obj_exemplo = existing_steps_map[primeira_url]
 
             for index, question_div in enumerate(question_blocks):
                 if index >= len(final_user_data.questions):
@@ -99,17 +101,17 @@ class MoodleScraper:
                 for metadata in steps_metadata:
                     step_url = metadata["url"]
                     step_ts = metadata["timestamp"]
-                    step_url = metadata["url"]
+
+                    # print(f"DEBUG {step_url} steps found in question")
 
                     # If step was already downloaded, retrieve it from existing data
                     if step_url in self.steps_urls and step_url in existing_steps_map:
                         merged_steps.append(existing_steps_map[step_url])
                     else:
-                        # Caso não exista, baixa e salva a URL no objeto
                         step_response = await self.http_session.get(step_url)
                         step_obj = parse_step_detail(step_response.text, step_ts, step_url)
                         if step_obj:
-                            step_obj.url = step_url  # Guarda a URL para a próxima vez
+                            step_obj.url = step_url
                             merged_steps.append(step_obj)
                             self.steps_urls.add(step_url)
 
@@ -131,13 +133,65 @@ class MoodleScraper:
                 student_row.write(f"🔴 {student_name}: Error ({error})")
             return existing_user_data if existing_user_data else UserQuizData(username=student_name)
 
-    async def run(self, quiz_id: str, status_container=None,
-                  existing_data: List[UserQuizData] = None
-                  ) -> Tuple[List[UserQuizData], Set[str]]:
-        """Orchestrates the incremental scraping process for all students."""
-        print("DEBUG scraper run")
+    # async def run(self, quiz_id: str, status_container=None,
+    #               existing_data: List[UserQuizData] = None
+    #               ) -> Tuple[List[UserQuizData], Set[str]]:
+    #     """Orchestrates the incremental scraping process for all students."""
+    #     if not await self.login():
+    #         return []
+    #
+    #     # Map existing students for fast access
+    #     existing_data_map = {}
+    #     if existing_data:
+    #         for user in existing_data:
+    #             if hasattr(user, "username"):
+    #                 existing_data_map[user.username] = user
+    #
+    #     report_url = (
+    #         f"{self.base_url}/mod/quiz/report.php?id={quiz_id}"
+    #         "&mode=overview"
+    #         "&attempts=enrolled_with"
+    #         "&onlygraded=1"
+    #         "&onlyregraded=0"
+    #         "&slotmarks=1"
+    #         "pagesize=2000"
+    #         "&tsort=timestart"
+    #         "&tdir=4"
+    #     )
+    #     response = await self.http_session.get(report_url)
+    #     soup = BeautifulSoup(response.text, "html.parser")
+    #
+    #     table = soup.select_one("table#attempts, table.generaltable")
+    #     if not table:
+    #         return []
+    #
+    #     tasks = []
+    #     for row in table.select("tbody tr"):
+    #         cells = row.find_all("td")
+    #         if len(cells) < 3: continue
+    #
+    #         link_tag = cells[2].find("a", href=lambda h: h and "review.php" in h)
+    #         if not link_tag: continue
+    #
+    #         raw_name = cells[2].get_text(strip=True)
+    #         clean_name = raw_name.replace("Revisão de tentativa", "").strip()
+    #
+    #         tasks.append(self.fetch_student_full_history(
+    #             clean_name, link_tag["href"], status_container, existing_data_map.get(clean_name)
+    #         ))
+    #
+    #     results = await asyncio.gather(*tasks)
+    #     final_data = [r for r in results if r is not None]
+    #
+    #     return final_data, self.steps_urls
+
+    async def run(
+            self, quiz_id: str, status_container,
+            existing_data: Optional[List[UserQuizData]] = None
+    ) -> Tuple[List[UserQuizData], Set[str]]:
+        """Main incremental scraping process for all students."""
         if not await self.login():
-            return []
+            return [], self.steps_urls
 
         # Map existing students for fast access
         existing_data_map = {}
@@ -146,32 +200,59 @@ class MoodleScraper:
                 if hasattr(user, "username"):
                     existing_data_map[user.username] = user
 
-        report_url = f"{self.base_url}/mod/quiz/report.php?id={quiz_id}&mode=overview"
+        report_url = (
+            f"{self.base_url}/mod/quiz/report.php?id={quiz_id}"
+            "&mode=overview"
+            "&attempts=enrolled_with"
+            "&onlygraded=1"
+            "&onlyregraded=0"
+            "&slotmarks=1"
+            "&pagesize=2000"
+            "&tsort=timestart"
+            "&tdir=3"
+        )
         response = await self.http_session.get(report_url)
         soup = BeautifulSoup(response.text, "html.parser")
 
         table = soup.select_one("table#attempts, table.generaltable")
         if not table:
-            return []
+            return [], self.steps_urls
 
         tasks = []
+        processed_students = set()  # Track students already added to the task list
+
         for row in table.select("tbody tr"):
             cells = row.find_all("td")
-            if len(cells) < 3: continue
+            if len(cells) < 3:
+                continue
 
+            # Find the review link in the 3rd column (usually Name/Status)
             link_tag = cells[2].find("a", href=lambda h: h and "review.php" in h)
-            if not link_tag: continue
+            if not link_tag:
+                continue
 
+            # Extract and clean student name
             raw_name = cells[2].get_text(strip=True)
             clean_name = raw_name.replace("Revisão de tentativa", "").strip()
 
-            tasks.append(self.fetch_student_full_history(
-                clean_name, link_tag["href"], status_container, existing_data_map.get(clean_name)
+            # LOGIC: Since the table is chronological (most recent first),
+            # if the student is already in the set, skip subsequent (older) attempts.
+            if clean_name in processed_students:
+                continue
+
+            processed_students.add(clean_name)
+
+            # Only scrape the most recent attempt
+            if "Isabely" in clean_name or "Simoes" in clean_name or "Ludmyla" in clean_name:
+                tasks.append(self.fetch_student_full_history(
+                clean_name,
+                link_tag["href"],
+                status_container,
+                existing_data_map.get(clean_name)
             ))
 
         results = await asyncio.gather(*tasks)
         final_data = [r for r in results if r is not None]
-        print(f"DEBUG scraper finished ({len(final_data)} students)")
 
         return final_data, self.steps_urls
 

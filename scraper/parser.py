@@ -12,6 +12,7 @@ from typing import List, Dict, Optional, Any
 from bs4 import BeautifulSoup
 from models.quiz_models import TestCase, SubmissionStep, QuestionData, UserQuizData
 
+
 def parse_moodle_datetime(text: str) -> Optional[datetime]:
     """
     Parses Moodle PT-BR date strings into datetime objects.
@@ -45,12 +46,14 @@ def parse_moodle_datetime(text: str) -> Optional[datetime]:
 
     return None
 
+
 def extract_step_id(url: str) -> Optional[int]:
     """Extracts the unique 'step' parameter from a Moodle URL."""
     if not url:
         return None
     match = re.search(r'step=(\d+)', url)
     return int(match.group(1)) if match else None
+
 
 def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
     """
@@ -65,7 +68,7 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
 
     if hist_table and hist_table.tbody:
         rows = hist_table.tbody.find_all("tr")
-        for row in rows:
+        for row in rows[1:]:
             cells = row.find_all("td")
             if len(cells) < 2:
                 continue
@@ -78,6 +81,8 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
             if link and "reviewquestion.php" in link['href']:
                 step_url = link['href']
                 step_id = extract_step_id(step_url)
+
+                # print(f"DEBUG step url: {step_url}")  ### REMOVE LINE
 
                 # Column 1: Timestamp
                 ts_text = cells[1].get_text(strip=True)
@@ -93,6 +98,7 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
     # Sort by timestamp to ensure chronological order
     steps_metadata.sort(key=lambda x: x["timestamp"])
     return steps_metadata
+
 
 def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionStep:
     """
@@ -152,7 +158,12 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
 
             if not passed:
                 row_text = row.get_text().lower()
-                if "***run error***" in row_text or "exception" in row_text or "traceback" in row_text:
+                if ("***run error***" in row_text
+                        or "exception" in row_text
+                        or "traceback" in row_text
+                        or ": error :" in row_text
+                        or "all warnings being treated as errors" in row_text):
+                    # print("DEBUG Compiler", )
                     is_runtime = True
                 elif "syntaxerror" in row_text or "compilation error" in row_text:
                     is_compilation = True
@@ -162,16 +173,20 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
                 is_runtime_error=is_runtime,
                 is_compilation_error=is_compilation
             ))
+            # print(f"DEBUG Table PRESENT --> compilation error = {is_compilation}")
 
     # 3. Global Error Handling (No table present)
     elif q_div.select_one(".coderunner-test-results.failure") or \
-         q_div.select_one(".coderunner-compilation-output") or \
-         "syntaxerror" in q_div.get_text().lower():
+            q_div.select_one(".coderunner-compilation-output") or \
+            "syntaxerror" in q_div.get_text().lower():
 
         test_results.append(TestCase(
             passed=False,
             is_compilation_error=True
         ))
+        # print(f"DEBUG No table present --> compilation error!")
+    # else:
+        # print("DEBUG Something else here!")
 
     return SubmissionStep(
         timestamp=timestamp,
@@ -179,6 +194,7 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
         score=score,
         test_results=test_results
     )
+
 
 def parse_student_page(html: str, username: str) -> UserQuizData:
     """
@@ -200,7 +216,6 @@ def parse_student_page(html: str, username: str) -> UserQuizData:
                     user_data.quiz_start_timestamp = parse_moodle_datetime(val)
                 if "conclu" in text or "finished" in text:
                     user_data.quiz_end_timestamp = parse_moodle_datetime(val)
-    print(f"DEBUG parse: {username} started {user_data.quiz_start_timestamp}")
 
     # 2. Identify Questions
     # Captures all questions visible on the main page

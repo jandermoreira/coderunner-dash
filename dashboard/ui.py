@@ -6,13 +6,17 @@ This module implements the dashboard user interface for the CodeRunner Monitorin
 It provides instructors with real-time insights into student submission patterns.
 """
 from datetime import datetime
+from pprint import pprint
 
 from analytics.metrics import calculate_analytics
 from dashboard.data_management import *
 from analytics.pipeline import run_pedagogical_pipeline
-from models.quiz_models import InterventionType
+from models.quiz_models import InterventionType, StrategyProfile
 from streamlit_extras.stylable_container import stylable_container
 from streamlit_autorefresh import st_autorefresh
+
+from collections import Counter
+import streamlit as st
 
 
 def format_timedelta(td):
@@ -30,37 +34,147 @@ def format_timedelta(td):
         return f"+{seconds}s"
 
 
+# def render_top_indicators(data):
+#     indicators = {
+#         "Students": len(data),
+#         "Questions": len(data[0].questions),
+#     }
+#
+#     intervene_now = sum([
+#         int(len([
+#             question.decision.intervention
+#             for question in student.questions
+#             if question.decision.intervention == InterventionType.INTERVENE_NOW
+#         ]) > 0) for student in data
+#     ])
+#     if intervene_now > 0:
+#         indicators[f"Intervene  ({intervene_now / len(data) * 100:.1f}%)"] = f"🚨 {intervene_now}"
+#
+#     technical = sum([
+#         int(len([
+#             question.decision.intervention
+#             for question in student.questions
+#             if question.decision.intervention == InterventionType.TECHNICAL
+#         ]) > 0) for student in data
+#     ])
+#     if technical > 0:
+#         indicators[f"Technical  ({technical / len(data) * 100:.1f}%)"] = f"🔧 {technical}"
+#
+#     cols = st.columns(len(indicators))
+#     for idx, (title, value) in enumerate(indicators.items()):
+#         with cols[idx]:
+#             st.metric(title, value)
+
+
 def render_top_indicators(data):
-    indicators = {
-        "Students": len(data),
-        "Questions": len(data[0].questions),
-    }
+    """
+    Renders pedagogical metrics dynamically.
+    Columns are only created for issues that actually exist (count > 0).
+    """
+    if not data:
+        return
 
-    intervene_now = sum([
-        int(len([
-            question.decision.intervention
-            for question in student.questions
-            if question.decision.intervention == InterventionType.INTERVENE_NOW
-        ]) > 0) for student in data
-    ])
-    if intervene_now > 0:
-        indicators[f"Intervene  ({intervene_now / len(data) * 100:.1f}%)"] = f"🚨 {intervene_now}"
+    # --- 1. DATA AGGREGATION ---
+    total_students = len(data)
+    total_questions = len(data[0].questions) if total_students > 0 else 0
 
-    technical = sum([
-        int(len([
-            question.decision.intervention
-            for question in student.questions
-            if question.decision.intervention == InterventionType.TECHNICAL
-        ]) > 0) for student in data
-    ])
-    if technical > 0:
-        indicators[f"Technical  ({technical / len(data) * 100:.1f}%)"] = f"🔧 {technical}"
+    # We count unique students affected by each intervention type
+    tech_student_count = 0
+    logic_student_count = 0
+    finished_student_count = 0
+    problem_spots = Counter()
 
-    cols = st.columns(len(indicators))
-    for idx, (title, value) in enumerate(indicators.items()):
-        with cols[idx]:
-            st.metric(title, value)
+    for student in data:
+        if student.quiz_end_timestamp:
+            finished_student_count += 1
 
+        has_tech_issue = False
+        has_logic_issue = False
+
+        for idx, q in enumerate(student.questions):
+            # Check for Technical Issues
+            if q.decision.intervention == InterventionType.TECHNICAL:
+                has_tech_issue = True
+                problem_spots[f"Q{idx + 1}"] += 1
+
+            # Check for Logical Blocks (Intervene Now)
+            if q.decision.intervention == InterventionType.INTERVENE_NOW:
+                has_logic_issue = True
+                problem_spots[f"Q{idx + 1}"] += 1
+
+        if has_tech_issue:
+            tech_student_count += 1
+        if has_logic_issue:
+            logic_student_count += 1
+
+    # --- 2. DEFINE ACTIVE METRICS ---
+    # We always show the general context
+    active_metrics = [
+        {
+            "label": "Quiz Overview",
+            "value": f"{total_students} Students",
+            "delta": f"{total_questions} Questions",
+            "color": "normal"
+        }
+    ]
+
+    # Add Technical column only if there are issues
+    if tech_student_count > 0:
+        active_metrics.append({
+            "label": "Technical Issues",
+            "value": tech_student_count,
+            "delta": "Language/coding",
+            "color": "inverse"
+        })
+
+    # Add Pedagogical column only if there are alerts
+    if logic_student_count > 0:
+        active_metrics.append({
+            "label": "Pedagogical Alerts",
+            "value": logic_student_count,
+            "delta": "Logical/Plateau",
+            "color": "inverse"
+        })
+
+    # Add Hotspot column only if there's a specific question causing problems
+    if problem_spots:
+        hotspot_q, _ = problem_spots.most_common(1)[0]
+        active_metrics.append({
+            "label": "Critical Hotspot",
+            "value": hotspot_q,
+            "delta": "Highest friction",
+            "color": "off"
+        })
+
+    if finished_student_count > 0:
+        if finished_student_count == total_students:
+            finished_value = "100%"
+        else:
+            percentage_finished = round(finished_student_count/total_students * 100, 0)
+            if percentage_finished > 60:
+                finished_value = f"{finished_student_count} ({percentage_finished}%)"
+            else:
+                finished_value = finished_student_count
+        active_metrics.append({
+                    "label": "Finished",
+                    "value": finished_value,
+                    "delta": "Give some attention",
+                    "color": "off"
+                })
+
+    # --- 3. DYNAMIC RENDERING ---
+    # The number of columns is equal to the number of active issues + context
+    if active_metrics:
+        cols = st.columns(len(active_metrics))
+        for i, metric in enumerate(active_metrics):
+            with cols[i]:
+                st.metric(
+                    label=metric["label"],
+                    value=metric["value"],
+                    delta=metric["delta"],
+                    delta_color=metric["color"],
+                    delta_arrow="off"
+                )
 
 def render_sidebar():
     """
@@ -197,7 +311,6 @@ def render_intervention_section(enriched_data, intervention_type, title, st_meth
 
     cols = st.columns(number_columns)
     for student in sorted(enriched_data, key=lambda u: u.username.lower()):
-        # total_questions = len(student.questions)
         questions_in_type = [(idx, question) for idx, question in enumerate(student.questions)
                              if question.decision.intervention == intervention_type]
         if questions_in_type:
@@ -220,7 +333,7 @@ def render_intervention_section(enriched_data, intervention_type, title, st_meth
                     for idx, question in questions_in_type:
                         st.markdown(f"**{idx + 1}**: {question.decision.justification}")
                     if student.quiz_end_timestamp:
-                        render_box(f"🏁 Finalizada em {student.quiz_end_timestamp}")
+                        render_box(f"🏁 Finished {student.quiz_end_timestamp}")
                 count += 1
 
     # if count == 0 and empty_msg:
@@ -276,7 +389,6 @@ def run_dashboard():
     username, password, quiz_id = render_sidebar()
 
     # Auto-sync on refresh
-    print('refresh', st.session_state.refresh_count)
     if st.session_state.enable_auto_sync:
         interval_changed = st.session_state.sync_interval != st.session_state.last_sync_interval
         st.session_state.last_sync_interval = st.session_state.sync_interval
