@@ -145,7 +145,7 @@ def sync_with_moodle(user, password, quiz_id):
                         dill.dump(cache_to_save, f)
 
                     status.update(label="Sync complete!", state="complete", expanded=False)
-                    sleep(3)
+                    sleep(0.5)
 
                 except Exception as e:
                     status.update(label="Failed to save cache!", state="error", expanded=True)
