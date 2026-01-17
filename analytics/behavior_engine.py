@@ -55,15 +55,19 @@ def derive_pedagogical_decision(question: QuestionData) -> PedagogicalDecision:
         return decision
 
     # --- LAYER 1: Technical Sanitation ---
-    compilation_errors = sum(
-        1 for step in steps if any(test.is_compilation_error for test in step.test_results)
+    RECENT_WINDOW = 3
+    recent_steps = steps[-RECENT_WINDOW:]
+    recent_compilation_errors = sum(
+        1 for step in recent_steps
+        if any(test.is_compilation_error for test in step.test_results)
     )
-    noise_ratio = compilation_errors / len(steps)
 
-    if noise_ratio > 0.6 and len(steps) > 5:
+    if recent_compilation_errors >= 2:
         decision.is_technical_noise = True
         decision.intervention = InterventionType.TECHNICAL
-        decision.justification = "High technical noise: frequent compilation errors (syntax struggle)."
+        decision.justification = (
+            "High technical noise in recent submissions: compilation errors blocking execution."
+        )
         return decision
 
     # --- LAYER 2: Technical Metrics (in minutes) ---
