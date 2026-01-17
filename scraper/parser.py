@@ -102,14 +102,14 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
 
 def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionStep:
     soup = BeautifulSoup(html, "html.parser")
-    q_div = soup.select_one("div.que.coderunner")
+    question_div = soup.select_one("div.que.coderunner")
 
-    # if not q_div:
-    #     return SubmissionStep(timestamp=timestamp, url=url, score=0.0)
+    if not question_div:
+        return SubmissionStep(timestamp=timestamp, url=url, score=0.0)
 
     # 1. SCORE
     score = 0.0
-    grading_div = q_div.select_one(".gradingdetails")
+    grading_div = question_div.select_one(".gradingdetails")
     if grading_div:
         match = re.search(r'([\d.,]+)\s*(?:/|de|out of)', grading_div.get_text())
         if match:
@@ -118,7 +118,7 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
     test_results = []
 
     # 2. ERRORS
-    error_containers = q_div.select(
+    error_containers = question_div.select(
         ".coderunner-compilation-output, .cr-test-error, .coderunner-test-results.bad, .coderunner-stderr, pre.pre_syntax_error"
     )
 
@@ -150,7 +150,7 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
         ))
     else:
         # 3. TABLE
-        table = q_div.select_one("table.coderunner-test-results")
+        table = question_div.select_one("table.coderunner-test-results")
         if table:
             rows = table.select("tbody tr")
             for row in rows:
@@ -170,24 +170,24 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
                     is_runtime_error=is_run
                 ))
 
-    # --- DETECTED DATA SUMMARY ---
-    passed_count = sum(1 for t in test_results if t.passed)
-    failed_count = len(test_results) - passed_count
-
-    # Check if any test case (or the synthetic error case) flagged a technical issue
-    comp_found = any(t.is_compilation_error for t in test_results)
-    runt_found = any(t.is_runtime_error for t in test_results)
-
-    print(f"\n" + "=" * 50)
-    print(f"DETECTION LOG for: {url.split('/')[-1]}")
-    print(f"Score extracted: {score}")
-    print(f"Test Cases found: {len(test_results)}")
-    print(f"  > Passed: {passed_count}")
-    print(f"  > Failed: {failed_count}")
-    print(f"Technical Flags:")
-    print(f"  > Compilation Error: {comp_found}")
-    print(f"  > Runtime Error:     {runt_found}")
-    print("=" * 50 + "\n")
+    # # --- DETECTED DATA SUMMARY ---
+    # passed_count = sum(1 for t in test_results if t.passed)
+    # failed_count = len(test_results) - passed_count
+    #
+    # # Check if any test case (or the synthetic error case) flagged a technical issue
+    # comp_found = any(t.is_compilation_error for t in test_results)
+    # runt_found = any(t.is_runtime_error for t in test_results)
+    #
+    # print(f"\n" + "=" * 50)
+    # print(f"DETECTION LOG for: {url.split('/')[-1]}")
+    # print(f"Score extracted: {score}")
+    # print(f"Test Cases found: {len(test_results)}")
+    # print(f"  > Passed: {passed_count}")
+    # print(f"  > Failed: {failed_count}")
+    # print(f"Technical Flags:")
+    # print(f"  > Compilation Error: {comp_found}")
+    # print(f"  > Runtime Error:     {runt_found}")
+    # print("=" * 50 + "\n")
 
     return SubmissionStep(
         timestamp=timestamp,
