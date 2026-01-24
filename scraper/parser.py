@@ -82,7 +82,7 @@ def extract_available_steps(question_div: Any) -> List[Dict[str, Any]]:
                 step_url = link['href']
                 step_id = extract_step_id(step_url)
 
-                # print(f"DEBUG step url: {step_url}")  ### REMOVE LINE
+                print(f"DEBUG step url: {step_url}")  ### REMOVE LINE
 
                 # Column 1: Timestamp
                 ts_text = cells[1].get_text(strip=True)
@@ -152,11 +152,9 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
             if "traceback" in err_text or "runtime error" in err_text:
                 is_global_runtime_error = True
 
-        # Fallback: if containers exist but keywords weren't found, assume compilation error
         if not is_compilation_error and not is_global_runtime_error:
             is_compilation_error = True
 
-    # If global errors exist, create a synthetic failed test case (optional, depending on UI needs)
     if is_compilation_error or is_global_runtime_error:
         test_results.append(TestCase(
             passed=False,
@@ -184,7 +182,6 @@ def parse_step_detail(html: str, timestamp: datetime, url: str) -> SubmissionSte
                 ))
 
     # 4. AGGREGATE FLAGS FOR THE SUBMISSION STEP
-    # A step has a runtime error if a global one occurred OR if any specific test case failed with one
     step_has_runtime_error = is_global_runtime_error or any(
         t.is_runtime_error for t in test_results)
 

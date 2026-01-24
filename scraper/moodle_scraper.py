@@ -64,6 +64,7 @@ class MoodleScraper:
                 student_row = ui_status.empty()
                 student_row.write(f"🔄 Searching for {student_name}")
 
+
             response = await self.http_session.get(review_url)
             current_page_data = parse_student_page(response.text, student_name)
 
@@ -77,10 +78,12 @@ class MoodleScraper:
             soup = BeautifulSoup(response.text, "html.parser")
             question_blocks = soup.select("div.que.coderunner")
 
+            # TODO: check if step 0 is include twice
             # Index existing steps for fast lookup during the merge
             existing_steps_map = {}
             for question in final_user_data.questions:
                 for step in question.steps:
+                    print(step.url)
                     if hasattr(step, "url") and step.url:
                         existing_steps_map[step.url] = step
 
@@ -175,7 +178,6 @@ class MoodleScraper:
             raw_name = cells[2].get_text(strip=True)
             clean_name = raw_name.replace("Revisão de tentativa", "").strip()
 
-            # LOGIC: Since the table is chronological (most recent first),
             # if the student is already in the set, skip subsequent (older) attempts.
             if clean_name in processed_students:
                 continue
@@ -183,6 +185,7 @@ class MoodleScraper:
             processed_students.add(clean_name)
 
             # Only scrape the most recent attempt
+            #if "Danilo" in clean_name: # or "Hugo" in clean_name:
             tasks.append(self.fetch_student_full_history(
                 clean_name,
                 link_tag["href"],

@@ -1,29 +1,34 @@
 from scraper.parser import parse_step_detail
 from datetime import datetime
 
-files = ["somente-erro-saida.html"]
+# Files to be tested
+sample_files = ["somente-erro-saida.html"]
 
-for f_name in files:
-    with open('samples/' +f_name, 'r', encoding='utf-8') as f:
-        html = f.read()
+for file_name in sample_files:
+    with open(f'samples/{file_name}', 'r', encoding='utf-8') as html_file:
+        html_content = html_file.read()
 
-    step = parse_step_detail(html, datetime.now(), f_name)
+    # Parse the HTML content using the updated parser logic
+    submission_step = parse_step_detail(html_content, datetime.now(), file_name)
 
-    print(f"\n--- ARQUIVO: {f_name} ---")
-    print(f"Nota: {step.score}")
-    print(f"Total de Testes: {len(step.test_results)}")
+    print(f"\n--- FILE: {file_name} ---")
+    print(f"Score: {submission_step.score}")
+    print(f"Total Test Cases: {len(submission_step.test_results)}")
 
-    # Verifica se algum teste foi marcado como erro
-    for t in step.test_results:
-        print("Comp", t.is_compilation_error)
-        print("Exec", t.is_runtime_error)
+    # Check flags directly from the SubmissionStep object
+    # (No longer iterating through tests to find compilation errors)
+    has_comp_error = submission_step.has_compilation_error
+    has_run_error = submission_step.has_runtime_error
 
-    comp_err = any(t.is_compilation_error for t in step.test_results)
-    runt_err = any(t.is_runtime_error for t in step.test_results)
+    print(f"Compilation Error Detected: {has_comp_error}")
+    print(f"Runtime Error Detected: {has_run_error}")
 
-    print(f"Erro de Compilação Detectado: {comp_err}")
-    print(f"Erro de Runtime Detectado: {runt_err}")
+    # Inspecting individual test cases for runtime errors (if any)
+    for idx, test_case in enumerate(submission_step.test_results):
+        print(f"  Test {idx + 1}: Passed={test_case.passed}, RuntimeErr={test_case.is_runtime_error}")
 
-    # Se a nota for 0 e não houver erro detectado, há algo errado na lógica
-    if step.score == 0 and not (comp_err or runt_err):
-        print("⚠️ AVISO: Nota zero mas nenhum erro técnico foi classificado!")
+    # Logic validation: If score is 0 and no technical error was flagged
+    if submission_step.score == 0 and not (has_comp_error or has_run_error):
+        print("⚠️ WARNING: Score is zero but no technical error was classified!")
+
+    print("-" * 40)
